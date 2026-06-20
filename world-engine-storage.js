@@ -131,6 +131,21 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return String(value);
   }
 
+  function getSillyTavernRequestHeaders() {
+    try {
+      var ctx = getContext();
+      if (ctx && typeof ctx.getRequestHeaders === 'function') {
+        return ctx.getRequestHeaders() || {};
+      }
+    } catch(e) {}
+    try {
+      if (typeof window.getRequestHeaders === 'function') {
+        return window.getRequestHeaders() || {};
+      }
+    } catch(e) {}
+    return {};
+  }
+
   function notifyConfigChanged(key, action) {
     if (!APPLY_CONFIG_KEYS[key]) return;
     try {
@@ -160,9 +175,14 @@ window.WORLD_ENGINE_STORAGE = (function() {
   }
 
   async function pluginRequest(route, options) {
-    var response = await fetch(PLUGIN_BASE + route, Object.assign({
-      headers: { 'Content-Type': 'application/json' }
-    }, options || {}));
+    var requestOptions = Object.assign({}, options || {});
+    requestOptions.headers = Object.assign(
+      {},
+      getSillyTavernRequestHeaders(),
+      { 'Content-Type': 'application/json' },
+      requestOptions.headers || {}
+    );
+    var response = await fetch(PLUGIN_BASE + route, requestOptions);
     if (!response.ok) {
       throw new Error('World Engine plugin HTTP ' + response.status + ' for ' + route);
     }

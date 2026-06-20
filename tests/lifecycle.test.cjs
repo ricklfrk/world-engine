@@ -15,6 +15,7 @@ function createBrowserSandbox(options = {}) {
   const appends = [];
   const writes = [];
   const deletes = [];
+  const requests = [];
   const reads = new Map(Object.entries(options.files || {}));
   const context = Object.assign({
     chatId: 'chat A',
@@ -41,6 +42,7 @@ function createBrowserSandbox(options = {}) {
   }
 
   async function fetch(url, fetchOptions = {}) {
+    requests.push({ url, options: fetchOptions });
     if (url.endsWith('/status')) return jsonResponse({ ok: true });
     if (url.endsWith('/list')) {
       return jsonResponse({ files: Array.from(reads.keys()).map((filePath) => ({ path: filePath })) });
@@ -85,7 +87,7 @@ function createBrowserSandbox(options = {}) {
   };
   window.window = window;
 
-  return { sandbox, window, context, listeners, appends, writes, deletes, reads };
+  return { sandbox, window, context, listeners, appends, writes, deletes, reads, requests };
 }
 
 function runScript(sandbox, file) {
@@ -156,6 +158,26 @@ test('storage emits config and write lifecycle metadata without logging raw cont
   assert(lines.some((line) => line.type === 'config.saved' && line.details.key === 'world_engine_settings'));
   assert(lines.some((line) => line.type === 'config.saved' && line.details.key === 'world_engine_active_preset'));
   assert(!lines.some((line) => JSON.stringify(line).includes('secret')), 'raw config content must not enter lifecycle logs');
+});
+
+test('storage sends SillyTavern request headers to plugin writes', async () => {
+  const env = createBrowserSandbox({
+    context: {
+      getRequestHeaders() {
+        return { 'X-CSRF-Token': 'csrf-token' };
+      }
+    }
+  });
+  runScript(env.sandbox, 'world-engine-storage.js');
+
+  await env.window.WORLD_ENGINE_STORAGE.initConfigFolder();
+  env.window.WORLD_ENGINE_STORAGE.setItem('world_engine_settings', '{"ok":true}');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const writeRequest = env.requests.find((request) => request.url.endsWith('/file') && request.options.method === 'PUT');
+  assert(writeRequest, 'PUT request missing');
+  assert.equal(writeRequest.options.headers['X-CSRF-Token'], 'csrf-token');
+  assert.equal(writeRequest.options.headers['Content-Type'], 'application/json');
 });
 
 test('core saveState produces lifecycle state.save and writes chat files', async () => {

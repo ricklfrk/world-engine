@@ -67,7 +67,7 @@
     return './plugins/world-engine';
   }
 
-  var WORLD_ENGINE_VERSION = '3.4.2';
+  var WORLD_ENGINE_VERSION = '3.4.3';
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
