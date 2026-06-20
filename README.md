@@ -12,6 +12,7 @@ World Engine is a SillyTavern extension for long-form roleplay continuity. It tr
 - UI panel for world state, memory, story, worldbook, settings, snapshots, and achievements.
 - Enhancement layer for undo, recycle bin, dashboards, relation graphs, API monitor, weather/season, and scheduled evolution.
 - Plaintext config storage: settings, per-chat state, savepoints, and conversation evolution logs are written under `config/`.
+- Lifecycle audit logs are written as JSONL under `config/logs/` and `config/chats/<chat-id>/`.
 - Firefox-friendly UI controls: the main panel and popup windows can be moved by dragging their headers, and panel geometry is saved in `config/ui/panel-state.json`.
 - Settings, prompt presets, snapshots, and full config import/export write through the same plaintext storage adapter.
 - Saved settings, presets, worldbook selection, story/world state controls, and imports are applied immediately to the active injection context.
@@ -39,6 +40,8 @@ Firefox is supported. If Firefox keeps an old script after updating, restart Sil
 - Per-chat config: `config/chats/<chat-id>/config.json`
 - Rollback savepoints: `config/chats/<chat-id>/savepoints.json`
 - Conversation evolution log: `config/chats/<chat-id>/evolution.jsonl`
+- Global lifecycle log: `config/logs/lifecycle.jsonl`
+- Per-chat lifecycle log: `config/chats/<chat-id>/lifecycle.jsonl`
 
 ## Entry Points
 

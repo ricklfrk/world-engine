@@ -329,6 +329,18 @@ var LIFECYCLE_STATES = {
         if (state[ck] !== undefined) configFields[ck] = state[ck];
       }
       window.WORLD_ENGINE_STORAGE.setItem(configKey, JSON.stringify(configFields));
+      try {
+        if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.lifecycle === 'function') {
+          window.WORLD_ENGINE_LOGGER.lifecycle('state.save', {
+            chatId: chatId,
+            round: state.round || 0,
+            memories: Array.isArray(state.memories) ? state.memories.length : 0,
+            events: Array.isArray(state.events) ? state.events.length : 0,
+            factions: Array.isArray(state.factions) ? state.factions.length : 0,
+            plotThreads: Array.isArray(state.plotThreads) ? state.plotThreads.length : 0
+          }, 'debug');
+        }
+      } catch(logErr) {}
     } catch(e) { console.warn('[World Engine] 保存失败', e); }
   }
 

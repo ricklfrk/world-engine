@@ -26,6 +26,7 @@
 
   const MODULES = [
     'world-engine-storage.js',
+    'world-engine-logger.js',
     'world-engine-core.js',
     'world-engine-memory.js',
     'world-engine-tags.js',
@@ -41,6 +42,7 @@
 
   const MODULE_EXPORTS = {
     'world-engine-storage.js': 'WORLD_ENGINE_STORAGE',
+    'world-engine-logger.js': 'WORLD_ENGINE_LOGGER',
     'world-engine-core.js': 'WORLD_ENGINE_CORE',
     'world-engine-memory.js': 'WORLD_ENGINE_MEMORY',
     'world-engine-tags.js': 'WORLD_ENGINE_TAGS',
@@ -65,7 +67,7 @@
     return './plugins/world-engine';
   }
 
-  var WORLD_ENGINE_VERSION = '3.4.1';
+  var WORLD_ENGINE_VERSION = '3.4.2';
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -116,6 +118,42 @@
     if (el) el.remove();
   }
 
+  function logLifecycle(type, details, level) {
+    try {
+      if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.lifecycle === 'function') {
+        window.WORLD_ENGINE_LOGGER.lifecycle(type, details || {}, level || 'info');
+      }
+    } catch(e) {}
+  }
+
+  function logMessage(type, details, level) {
+    try {
+      if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.message === 'function') {
+        window.WORLD_ENGINE_LOGGER.message(type, details || {}, level || 'info');
+      }
+    } catch(e) {}
+  }
+
+  function logError(type, err, details) {
+    try {
+      if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.error === 'function') {
+        window.WORLD_ENGINE_LOGGER.error(type, err, details || {});
+      }
+    } catch(e) {}
+  }
+
+  function stateSummary(state) {
+    state = state || {};
+    return {
+      round: state.round || 0,
+      memories: Array.isArray(state.memories) ? state.memories.length : 0,
+      events: Array.isArray(state.events) ? state.events.length : 0,
+      factions: Array.isArray(state.factions) ? state.factions.length : 0,
+      plotThreads: Array.isArray(state.plotThreads) ? state.plotThreads.length : 0,
+      hasLastInjection: !!state.lastInjection
+    };
+  }
+
   // ========== 注入管理（registerInjection / extensionPrompts 双兼容） ==========
   const INJECTION_NAME = 'world-engine-world';
 
@@ -124,8 +162,10 @@
       const ctx = SillyTavern.getContext();
       if (typeof ctx.unregisterInjection === 'function') {
         ctx.unregisterInjection(INJECTION_NAME);
+        logLifecycle('injection.unregister', { method: 'unregisterInjection', name: INJECTION_NAME }, 'debug');
       } else if (Array.isArray(ctx.extensionPrompts)) {
         ctx.extensionPrompts = ctx.extensionPrompts.filter(p => p.name !== INJECTION_NAME);
+        logLifecycle('injection.unregister', { method: 'extensionPrompts', name: INJECTION_NAME }, 'debug');
       }
     } catch(e) { /* 忽略 */ }
   }
@@ -140,11 +180,13 @@
           ctx.unregisterInjection(INJECTION_NAME);
         }
         ctx.registerInjection(INJECTION_NAME, content, { position: 'before', priority: 10 });
+        logLifecycle('injection.register', { method: 'registerInjection', name: INJECTION_NAME, chars: content ? content.length : 0 }, 'debug');
         return true;
       }
       // 方法2：setExtensionPrompt（中版 ST）
       if (typeof ctx.setExtensionPrompt === 'function') {
         ctx.setExtensionPrompt(INJECTION_NAME, content, 'before', 10);
+        logLifecycle('injection.register', { method: 'setExtensionPrompt', name: INJECTION_NAME, chars: content ? content.length : 0 }, 'debug');
         return true;
       }
       // 方法3：extensionPrompts 数组（旧版 ST，最兼容）
@@ -157,14 +199,17 @@
           position: 'before',
           priority: 10
         });
+        logLifecycle('injection.register', { method: 'extensionPrompts', name: INJECTION_NAME, chars: content ? content.length : 0 }, 'debug');
         return true;
       }
       // 方法4：generateOpts（远古版，兜底）
       if (typeof ctx.generateOpts === 'object') {
         ctx.generateOpts.system_prompt = (ctx.generateOpts.system_prompt || '') + '\n\n' + content;
+        logLifecycle('injection.register', { method: 'generateOpts', name: INJECTION_NAME, chars: content ? content.length : 0 }, 'debug');
         return true;
       }
       console.warn('[World Engine] 所有注入方式均不可用');
+      logLifecycle('injection.register.unavailable', { name: INJECTION_NAME, chars: content ? content.length : 0 }, 'warn');
       return false;
     } catch (e) {
       console.error('[World Engine] 注入失败', e);
@@ -174,24 +219,45 @@
 
   async function init() {
     const baseUrl = getBaseUrl();
+    logLifecycle('boot.start', { baseUrl: baseUrl, version: WORLD_ENGINE_VERSION });
     console.log('[World Engine] 加载基础路径:', baseUrl);
     try {
       for (const mod of MODULES) {
-        await loadScript(`${baseUrl}/${mod}`);
+        logLifecycle('module.load.start', { module: mod }, 'debug');
+        try {
+          await loadScript(`${baseUrl}/${mod}`);
+        } catch (moduleError) {
+          logError('lifecycle.module.load.failed', moduleError, { module: mod });
+          throw moduleError;
+        }
         console.log(`[World Engine] 已加载: ${mod}`);
         // ★ 运行时检查：验证模块全局变量已定义，防止语法错误静默失败
+        logLifecycle('module.load.done', { module: mod, exportName: MODULE_EXPORTS[mod] || '' }, 'debug');
         const modVar = MODULE_EXPORTS[mod];
         if (!window[modVar]) {
+          logLifecycle('module.export.missing', { module: mod, exportName: modVar }, 'error');
           console.error(`[World Engine] ❌ ${mod} 加载异常：${modVar} 未定义，文件可能存在语法错误`);
         }
       }
 
       // v3.0.0: 强制刷新 CSS 缓存
       if (window.WORLD_ENGINE_STORAGE && typeof window.WORLD_ENGINE_STORAGE.initConfigFolder === 'function') {
+        logLifecycle('storage.init.start');
         await window.WORLD_ENGINE_STORAGE.initConfigFolder();
       }
 
+      if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.init === 'function') {
+        window.WORLD_ENGINE_LOGGER.init({
+          version: WORLD_ENGINE_VERSION,
+          backend: window.WORLD_ENGINE_STORAGE && window.WORLD_ENGINE_STORAGE.getBackendName ? window.WORLD_ENGINE_STORAGE.getBackendName() : ''
+        });
+      }
+      logLifecycle('storage.init.done', {
+        backend: window.WORLD_ENGINE_STORAGE && window.WORLD_ENGINE_STORAGE.getBackendName ? window.WORLD_ENGINE_STORAGE.getBackendName() : ''
+      });
+
       reloadCSS();
+      logLifecycle('css.reloaded');
 
       const core = window.WORLD_ENGINE_CORE;
       const memory = window.WORLD_ENGINE_MEMORY;
@@ -207,8 +273,11 @@
         throw new Error('UI模块未正确加载');
       }
 
+      logLifecycle('ui.build.start');
       ui.buildUI();
+      logLifecycle('ui.build.done');
       slash.registerCommands();
+      logLifecycle('slash.register.done');
 
       let isEvolving = false;
       let lastInjectedRound = -1;
@@ -230,10 +299,12 @@
       async function rebuildInjectionFromConfig(reason) {
         if (isApplyingConfig) {
           pendingConfigApply = reason || true;
+          logLifecycle('config.apply.queued', { reason: reason || 'pending' }, 'debug');
           return false;
         }
         isApplyingConfig = true;
         try {
+          logLifecycle('config.apply.start', { reason: reason || 'config' });
           lastInjectedRound = -1;
           const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
           const settings = readSettings();
@@ -246,33 +317,42 @@
 
           if (!ctx || !Array.isArray(ctx.chat) || ctx.chat.length === 0) {
             unregisterInjection();
+            logLifecycle('config.apply.no-chat', { reason: reason || 'config' }, 'debug');
             return true;
           }
 
           const state = core.loadState();
           const chatHistory = ctx.chat || [];
+          logLifecycle('config.apply.state.loaded', Object.assign({ reason: reason || 'config', chatLength: chatHistory.length }, stateSummary(state)), 'debug');
 
           if (settings.injectWorldbook === true && (!worldbookLoaded || shouldReloadWorldbookForConfig(reason))) {
             try {
+              logLifecycle('config.apply.worldbook.reload.start', { reason: reason || 'config' }, 'debug');
               await worldbook.loadWorldbooks();
               worldbookLoaded = true;
+              logLifecycle('config.apply.worldbook.reload.done', { reason: reason || 'config' }, 'debug');
             } catch(e) {
               console.warn('[World Engine] worldbook reload during config apply failed', e);
+              logError('lifecycle.config.apply.worldbook.reload.failed', e, { reason: reason || 'config' });
             }
           }
 
           let tags = [];
           try {
             tags = await tagsGen.generatePredictionTags(chatHistory, state);
+            logLifecycle('config.apply.tags.done', { reason: reason || 'config', tags: tags.length }, 'debug');
           } catch(e) {
             console.warn('[World Engine] tag rebuild during config apply failed', e);
+            logError('lifecycle.config.apply.tags.failed', e, { reason: reason || 'config' });
           }
 
           let context = '';
           try {
             context = await inject.buildContext(chatHistory, state, tags, { includeWorldbook: settings.injectWorldbook === true });
+            logLifecycle('config.apply.context.done', { reason: reason || 'config', chars: context ? context.length : 0 }, 'debug');
           } catch(e) {
             console.warn('[World Engine] injection rebuild during config apply failed', e);
+            logError('lifecycle.config.apply.context.failed', e, { reason: reason || 'config' });
           }
 
           state.lastInjection = {
@@ -283,13 +363,18 @@
             reason: reason || 'config'
           };
           core.saveState(state);
+          logLifecycle('config.apply.state.saved', Object.assign({ reason: reason || 'config' }, stateSummary(state)), 'debug');
 
           if (context) registerInjection(context);
           else unregisterInjection();
 
           if (ui && typeof ui.refresh === 'function') ui.refresh();
           console.log('[World Engine] Config applied immediately:', reason || 'config');
+          logLifecycle('config.apply.done', { reason: reason || 'config', contextChars: context ? context.length : 0 });
           return true;
+        } catch(e) {
+          logError('lifecycle.config.apply.failed', e, { reason: reason || 'config' });
+          throw e;
         } finally {
           isApplyingConfig = false;
           if (pendingConfigApply) {
@@ -302,6 +387,7 @@
 
       function scheduleConfigApply(reason) {
         clearTimeout(configApplyTimer);
+        logLifecycle('config.apply.scheduled', { reason: reason || 'config' }, 'debug');
         configApplyTimer = setTimeout(function() {
           rebuildInjectionFromConfig(reason).catch(function(e) {
             console.warn('[World Engine] immediate config apply failed', e);
@@ -319,28 +405,42 @@
 
       window.addEventListener('world-engine:config-saved', function(event) {
         const detail = event && event.detail ? event.detail : {};
+        logLifecycle('config.saved.event', detail, 'debug');
         scheduleConfigApply(detail.key || detail.path || 'config');
       });
 
       // ========== 主API注入：在用户发送消息之前（非消息注入，改用 prompt 注入） ==========
       async function beforeMessageSend() {
         // Bug 5：防重入锁
-        if (window.__WORLD_ENGINE_INJECTING__) return;
+        if (window.__WORLD_ENGINE_INJECTING__) {
+          logMessage('before-send.skip.locked', {}, 'debug');
+          return;
+        }
         window.__WORLD_ENGINE_INJECTING__ = true;
         try {
+          logMessage('before-send.start');
           const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
-          if (!ctx) return;
+          if (!ctx) {
+            logMessage('before-send.no-context', {}, 'warn');
+            return;
+          }
           const state = core.loadState();
           const currentRound = state.round;
-          if (lastInjectedRound === currentRound) return;
+          if (lastInjectedRound === currentRound) {
+            logMessage('before-send.skip.same-round', { round: currentRound }, 'debug');
+            return;
+          }
           lastInjectedRound = currentRound;
 
           const chatHistory = ctx.chat || [];
+          logMessage('before-send.state.loaded', Object.assign({ chatLength: chatHistory.length }, stateSummary(state)), 'debug');
 
           // Bug 1：首次发送时惰性加载 worldbook
           if (!worldbookLoaded) {
             worldbookLoaded = true;
+            logMessage('before-send.worldbook.load.start', {}, 'debug');
             try { await worldbook.loadWorldbooks(); } catch(e) { console.warn('[World Engine] worldbook 模块失败', e); }
+            logMessage('before-send.worldbook.load.attempted', {}, 'debug');
           }
 
           // v2.3.0：驱动模式检查 — 手动模式下按间隔触发推演
@@ -353,7 +453,9 @@
             const aiMsg = !lastMsg?.is_user ? (lastMsg?.mes || '') : '';
             showPersistToast('⏳ 手动模式推演中...');
             try {
+              logMessage('before-send.manual-evolve.start', { round: currentRound, evolveInterval: evolveInterval });
               await evolution.evolve(state, userMsg, aiMsg);
+              logMessage('before-send.manual-evolve.done', { round: currentRound });
               removePersistToast();
             } catch(e) {
               removePersistToast();
@@ -365,6 +467,7 @@
           let context; try { context = await inject.buildContext(chatHistory, state, tags, { includeWorldbook: settings.injectWorldbook === true }); } catch(e) { console.warn('[World Engine] inject 模块失败', e); context = ''; }
 
           // 保存最后一次注入的内容供调试
+          logMessage('before-send.context.ready', { round: currentRound, tags: tags ? tags.length : 0, chars: context ? context.length : 0 }, 'debug');
           state.lastInjection = {
             timestamp: Date.now(),
             round: currentRound,
@@ -372,11 +475,13 @@
             tagsUsed: tags
           };
           core.saveState(state);
+          logMessage('before-send.state.saved', Object.assign({ round: currentRound }, stateSummary(state)), 'debug');
           if (window.WORLD_ENGINE_UI && window.WORLD_ENGINE_UI.refresh) window.WORLD_ENGINE_UI.refresh();
 
           // Bug 4+5：使用 prompt 注入代替 addOneMessage，不污染聊天记录
           const success = registerInjection(context);
           if (success) {
+            logMessage('before-send.injection.registered', { round: currentRound, chars: context ? context.length : 0 });
             console.log(`[World Engine] 注入成功 (round ${currentRound}, ${context.length} chars)`);
           } else {
             // 终极兜底：用 addOneMessage（带标记避免重复触发）
@@ -393,10 +498,15 @@
                 swipe_info: null,
               };
               ctx.addOneMessage(systemMessage);
+              logMessage('before-send.injection.fallback-message', { round: currentRound, chars: context ? context.length : 0 }, 'warn');
             } else {
               console.warn('[World Engine] 无法注入上下文');
             }
           }
+          logMessage('before-send.done', { round: currentRound, chars: context ? context.length : 0 });
+        } catch(e) {
+          logError('message.before-send.failed', e);
+          throw e;
         } finally {
           window.__WORLD_ENGINE_INJECTING__ = false;
         }
@@ -404,17 +514,22 @@
 
       // ========== 消息接收后的处理（存储记忆、推演 + v2.3.0 时间推进） ==========
       async function onMessageReceived() {
-        if (isEvolving) return;
+        if (isEvolving) {
+          logMessage('received.skip.evolving', {}, 'debug');
+          return;
+        }
         isEvolving = true;
 
         const persistToast = showPersistToast('🌍 世界推演中...');
 
         try {
+          logMessage('received.start');
           const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
-          if (!ctx) { isEvolving = false; return; }
+          if (!ctx) { logMessage('received.no-context', {}, 'warn'); isEvolving = false; return; }
           const state = core.loadState();
           const chat = ctx.chat || [];
-          if (chat.length === 0) { isEvolving = false; return; }
+          if (chat.length === 0) { logMessage('received.no-chat', {}, 'debug'); isEvolving = false; return; }
+          logMessage('received.state.loaded', Object.assign({ chatLength: chat.length }, stateSummary(state)), 'debug');
 
           // ★ 2026-06-05 Bug 1 强化：新聊天冻结，等用户-模型完成至少一轮完整交互后再推演
           // chat.length: 1=角色开场白, 2=用户发了第一条但尚未收到回复, 3=第一轮完整交互
@@ -423,14 +538,19 @@
             isEvolving = false;
             removePersistToast();
             ui.refresh();
+            logMessage('received.skip.opening', { chatLength: chat.length }, 'debug');
             return;
           }
           const lastMsg = chat[chat.length - 1];
           const userMsg = lastMsg?.is_user ? (lastMsg.mes || '') : '';
           const aiMsg = !lastMsg?.is_user ? (lastMsg?.mes || '') : '';
+          logMessage('received.exchange.loaded', { round: state.round, userChars: userMsg.length, aiChars: aiMsg.length }, 'debug');
 
           // 存储本轮记忆
+          logMessage('received.memory.store.start', { round: state.round }, 'debug');
           try { await memory.storeMemoryFromRound(state, userMsg, aiMsg, state.round); } catch(e) { console.warn('[World Engine] memory 模块失败', e); }
+          logMessage('received.memory.store.done', { round: state.round, memories: Array.isArray(state.memories) ? state.memories.length : 0 }, 'debug');
+          logMessage('received.events.force.start', { round: state.round }, 'debug');
 
           // 强制触发事件链 + 血仇追杀
           try { evolution.forceTriggerEvents(state); } catch(e) { console.warn('[World Engine] evolution 事件链模块失败', e); }
@@ -442,11 +562,13 @@
           const driveMode = state.driveMode || settings.driveMode || 'ai';
           // v2.3.0 Bugfix: 手动模式下不在此触发演化（由 beforeMessageSend 按间隔触发）
           if (settings.autoEvolve !== false && driveMode !== 'manual') {
+            logMessage('received.evolve.start', { round: state.round, driveMode: driveMode });
             // v2.3.0：捕获演化结果以提取 timeEstimateMinutes
             // 这里在进化模块内，进化 API 返回 update 对象
             // 由于 evolution.evolve 内部调用 callEvolutionAPI，返回布尔值
             // 我们从 state 备份恢复中获取最新状态
             evolveSuccess = await evolution.evolve(state, userMsg, aiMsg);
+            logMessage('received.evolve.done', { round: state.round, success: evolveSuccess });
             // 重新加载状态以获取最新数据
             if (evolveSuccess) {
               const updatedState = core.loadState();
@@ -456,15 +578,20 @@
 
           // v2.3.0：时间推进系统
           // v2.4.1 Bugfix: 使用 addTimeLog 记录时间日志，使 AI 模式的时间增量在 UI 中可见
+          if (settings.autoEvolve === false || driveMode === 'manual') {
+            logMessage('received.evolve.skipped', { round: state.round, driveMode: driveMode, autoEvolve: settings.autoEvolve !== false }, 'debug');
+          }
           if (evolveSuccess && timeModule && typeof timeModule.calculateTimeIncrement === 'function') {
             const oldMinutes = state.inWorldMinutes || 0;
             const chatText = userMsg + ' ' + aiMsg;
             let increment; try { increment = timeModule.calculateTimeIncrement(evolveResult, chatText, settings); } catch(e) { console.warn('[World Engine] time 模块失败', e); increment = 0; }
             core.addTimeLog(state, increment, 'ai');
             state.lastTimeCheckRound = state.round;
+            logMessage('received.time.advance', { round: state.round, increment: increment, oldMinutes: oldMinutes, newMinutes: state.inWorldMinutes || 0 }, 'debug');
 
             // 检查时间阈值触发
             const triggered = timeModule.shouldTriggerEvents(oldMinutes, state.inWorldMinutes);
+            logMessage('received.time.triggers', { round: state.round, triggered: triggered }, 'debug');
             if (triggered.includes('events')) {
               console.log('[World Engine] ⏰ 时间到达事件链触发阈值');
             }
@@ -607,9 +734,12 @@
           }
           // v3.0.0: 自动备份
           if (core && typeof core.autoBackup === 'function') {
+            logMessage('received.backup.start', {}, 'debug');
             try { core.autoBackup(core.loadState()); } catch(e) { console.warn('[World Engine] 自动备份失败', e); }
           }
+          logMessage('received.backup.attempted', {}, 'debug');
           ui.refresh();
+          logMessage('received.done', Object.assign({ success: evolveSuccess }, stateSummary(latestState)));
         } catch (e) {
           console.error('[World Engine] 处理失败', e);
           removePersistToast();
@@ -623,7 +753,9 @@
         // Bug 1：全新聊天，冻结所有推演
         const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
         const chat = ctx?.chat || [];
+        logLifecycle('chat.loaded.start', { chatLength: chat.length });
         if (chat.length === 0) {
+          logLifecycle('chat.loaded.empty', {}, 'debug');
           // ★ v2.5.1 Bugfix: 新聊天也清理
           if (core.clearSavepoints) core.clearSavepoints();
           const state = core.loadState();
@@ -635,6 +767,7 @@
           }
           worldbookLoaded = false;
         } else {
+          logLifecycle('chat.loaded.with-messages', { chatLength: chat.length }, 'debug');
           // ★ v2.5.1 Bugfix: 切聊天清理旧快照
           if (core.clearSavepoints) core.clearSavepoints();
           await worldbook.loadWorldbooks();
@@ -650,10 +783,12 @@
 
         const state = core.loadState();
         ui.refresh();
+        logLifecycle('chat.loaded.done', Object.assign({ chatLength: chat.length }, stateSummary(state)));
         console.log('[World Engine] 聊天已加载，世界书同步完成');
       }
 
       function onMessageSwiped() {
+        logLifecycle('message.swiped.start');
         lastInjectedRound = -1;
         // ★ v2.5.1: 消息切换时自动回退世界状态
         if (core && core.rollbackToChatLength && core.getSavepoints) {
@@ -665,6 +800,7 @@
               if (chatLen > 0) {
                 var restored = core.rollbackToChatLength(chatLen);
                 if (restored) {
+                  logLifecycle('message.swiped.rollback', { chatLength: chatLen }, 'warn');
                   console.log('[World Engine] 消息切换，世界状态已回退 (chatLen=' + chatLen + ')');
                   if (ui && ui.refresh) ui.refresh();
                 }
@@ -679,10 +815,12 @@
 
       // ★ v2.6.0: 消息删除时回退世界状态（修复 Bug-001/005）
       function onMessageDeleted() {
+        logLifecycle('message.deleted.start');
         try {
           var ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
           var chatLen = ctx?.chat?.length || 0;
           if (chatLen <= 0) {
+            logLifecycle('message.deleted.empty-chat', { chatLength: chatLen }, 'debug');
             // 聊天空了，清理全部存档
             if (core && core.clearSavepoints) core.clearSavepoints();
             lastInjectedRound = -1;
@@ -692,6 +830,7 @@
           if (core && core.rollbackToChatLength && core.getSavepoints) {
             var restored = core.rollbackToChatLength(chatLen);
             if (restored) {
+              logLifecycle('message.deleted.rollback', { chatLength: chatLen }, 'warn');
               // 过滤掉已回退的存档
               var sps = core.getSavepoints() || [];
               sps = sps.filter(function(sp) { return sp.chatLen <= chatLen; });
@@ -725,6 +864,13 @@
         // ★ v2.5.1: 消息删除时清理过期快照
         var messageDeletedEvent = ctx.event_types?.MESSAGE_DELETED || 'message_deleted';
         ctx.eventSource.on(messageDeletedEvent, onMessageDeleted);
+        logLifecycle('events.subscribed', {
+          messageSentEvent: messageSentEvent,
+          messageReceivedEvent: messageReceivedEvent,
+          chatLoadedEvent: chatLoadedEvent,
+          messageSwipedEvent: messageSwipedEvent || (typeof messageEditedEvent !== 'undefined' ? messageEditedEvent : ''),
+          messageDeletedEvent: messageDeletedEvent
+        });
         console.log('[World Engine] 事件绑定成功');
       } else {
         console.warn('[World Engine] 无法绑定事件，自动推演和注入不可用');
@@ -733,9 +879,11 @@
       // ★ v2.5.0: 初始化预设系统
       if (core && typeof core.initPresets === 'function') {
         core.initPresets();
+        logLifecycle('presets.init.done');
       }
       // Bug 1：不再在 init() 末尾调用 onChatLoaded()，等 CHAT_LOADED 事件触发
       window.__WORLD_ENGINE_LOADED__ = true;
+      logLifecycle('boot.done', { version: WORLD_ENGINE_VERSION });
     } catch (err) {
       console.error('[World Engine] 初始化失败', err);
     }

@@ -32,6 +32,14 @@ window.WORLD_ENGINE_UI = (function() {
     window.WORLD_ENGINE_STORAGE.setItem('world_engine_settings', JSON.stringify(settings || {}, null, 2));
   }
 
+  function logUi(event, detail, level) {
+    try {
+      if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.ui === 'function') {
+        window.WORLD_ENGINE_LOGGER.ui(event, detail || {}, level || 'info');
+      }
+    } catch(e) {}
+  }
+
   function readPanelState() {
     return readJSON(window.WORLD_ENGINE_STORAGE.getItem(PANEL_STATE_KEY), {});
   }
@@ -40,6 +48,7 @@ window.WORLD_ENGINE_UI = (function() {
     var state = readPanelState();
     for (var key in patch) state[key] = patch[key];
     try { window.WORLD_ENGINE_STORAGE.setItem(PANEL_STATE_KEY, JSON.stringify(state, null, 2)); } catch(e) {}
+    logUi('panel.state.save', { patch: patch }, 'debug');
   }
 
   function downloadJson(filename, data) {
@@ -252,10 +261,12 @@ window.WORLD_ENGINE_UI = (function() {
   function applyConfig(reason) {
     if (panelElement) applyPanelState(panelElement);
     refresh();
+    logUi('config.apply', { reason: reason || 'ui' }, 'debug');
     return true;
   }
 
   function requestConfigApply(reason) {
+    logUi('config.apply.request', { reason: reason || 'ui' });
     applyConfig(reason || 'ui');
     if (window.WORLD_ENGINE_RUNTIME && typeof window.WORLD_ENGINE_RUNTIME.scheduleConfigApply === 'function') {
       window.WORLD_ENGINE_RUNTIME.scheduleConfigApply(reason || 'ui');
@@ -472,6 +483,7 @@ window.WORLD_ENGINE_UI = (function() {
 
   /* ──────────────── BUILD UI ──────────────── */
   function buildUI() {
+    logUi('build.start');
     if (document.getElementById('world-engine-panel')) return;
     var panel = document.createElement('div');
     panel.id = 'world-engine-panel';
@@ -484,7 +496,7 @@ window.WORLD_ENGINE_UI = (function() {
 
     var html = '';
     // header
-    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.4.1</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
+    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.4.2</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
     // tab bar
     html += '<nav class="tab-bar">';
     for (var i = 0; i < ids.length; i++) {
@@ -546,6 +558,7 @@ window.WORLD_ENGINE_UI = (function() {
       dd();
       window.addEventListener('resize', dd);
     })();
+    logUi('build.done');
   }
 
   function addInputBarButton() {
@@ -570,6 +583,7 @@ window.WORLD_ENGINE_UI = (function() {
 
   /* ──────────────── PANEL CONTROL ──────────────── */
   function togglePanel() {
+    logUi('panel.toggle', { visible: !panelVisible }, 'debug');
     if (panelVisible) { hidePanel(); } else { showPanel(); }
   }
   function showPanel() {
@@ -580,6 +594,7 @@ window.WORLD_ENGINE_UI = (function() {
     applyPanelState(panelElement);
     switchTab(currentTab);
     refresh();
+    logUi('panel.show', { tab: currentTab }, 'debug');
   }
   function hidePanel() {
     if (!panelElement) return;
@@ -587,6 +602,7 @@ window.WORLD_ENGINE_UI = (function() {
     panelElement.classList.remove('show');
     panelVisible = false;
     savePanelGeometry(panelElement);
+    logUi('panel.hide', { tab: currentTab }, 'debug');
   }
   function resetUI() {
     panelVisible = false;
@@ -598,6 +614,7 @@ window.WORLD_ENGINE_UI = (function() {
   function switchTab(tabId) {
     currentTab = tabId;
     savePanelStatePatch({ tab: currentTab });
+    logUi('panel.tab', { tab: currentTab }, 'debug');
     if (!panelElement) return;
     panelElement.querySelectorAll('.tab-btn').forEach(function(b) {
       b.classList.toggle('active', b.dataset.tab === tabId);
@@ -3156,7 +3173,7 @@ window.WORLD_ENGINE_UI = (function() {
       if (exportAll) exportAll.addEventListener('click', function(){
         var payload = {
           schema: 'world-engine-config-export',
-          version: '3.4.1',
+          version: '3.4.2',
           exportedAt: new Date().toISOString(),
           settings: readSettings(),
           presets: readJSON(window.WORLD_ENGINE_STORAGE.getItem('world_engine_presets'), null),

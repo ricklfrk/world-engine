@@ -12,6 +12,7 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 | `index.js` | SillyTavern server plugin that exposes `/api/plugins/world-engine/*` file APIs scoped to `config/`. |
 | `world-engine.js` | UI loader and event orchestration. |
 | `world-engine-storage.js` | Config-folder storage adapter with extension-settings fallback only when the server plugin is absent. |
+| `world-engine-logger.js` | Lifecycle audit logger that writes structured JSONL records into `config/logs/` and per-chat log files. |
 | `world-engine-core.js` | Canonical world state model, migrations, savepoints, achievements, story templates, NPC schedules, plot threads, and combat/lifecycle helpers. |
 | `world-engine-memory.js` | Memory extraction, summary generation, and recall ranking. |
 | `world-engine-tags.js` | Prediction and extraction of entities, locations, factions, topics, emotions, and trigger tags. |
@@ -84,6 +85,8 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 | `config/chats/<chat-id>/config.json` | Per-chat config subset. |
 | `config/chats/<chat-id>/savepoints.json` | Per-chat rollback savepoints. |
 | `config/chats/<chat-id>/evolution.jsonl` | Append-only conversation evolution log. |
+| `config/logs/lifecycle.jsonl` | Global append-only lifecycle audit log. |
+| `config/chats/<chat-id>/lifecycle.jsonl` | Per-chat append-only lifecycle audit log. |
 | `config/kv/*.txt` | Fallback key/value files for uncommon keys. |
 
 ## Storage Rules
@@ -93,6 +96,7 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 3. The server plugin only reads/writes inside `config/` and rejects path traversal.
 4. Extension settings fallback is not canonical; it only keeps the UI functional when the server plugin is absent.
 5. Conversation evolution logs are append-only JSONL so they can be audited with ordinary text tools.
+6. Lifecycle logs are append-only JSONL and record boot, module load, config apply, storage metadata, UI panel actions, message injection, chat load, rollback, state save, and error events.
 
 ## Verification Workflow
 
@@ -117,3 +121,4 @@ Manual SillyTavern smoke checks:
 8. Create, export, import, activate, and delete a custom preset; confirm `config/presets.json` and `config/active-preset.txt` change.
 9. Send/receive one full exchange and confirm `config/chats/<chat-id>/state.json` changes.
 10. Confirm `config/chats/<chat-id>/evolution.jsonl` receives one JSON line after a successful evolution.
+11. Confirm `config/logs/lifecycle.jsonl` and `config/chats/<chat-id>/lifecycle.jsonl` receive lifecycle JSON lines after opening a chat and saving settings.

@@ -17,5 +17,7 @@ Expected files:
 - `chats/<chat-id>/config.json`: per-chat config subset.
 - `chats/<chat-id>/savepoints.json`: rollback savepoints.
 - `chats/<chat-id>/evolution.jsonl`: append-only conversation evolution log.
+- `logs/lifecycle.jsonl`: append-only global lifecycle audit log.
+- `chats/<chat-id>/lifecycle.jsonl`: append-only per-chat lifecycle audit log.
 
 The UI extension cannot write files by itself because it runs in the browser. File writes require the bundled `index.js` server plugin and SillyTavern `enableServerPlugins: true`.

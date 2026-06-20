@@ -145,6 +145,20 @@ window.WORLD_ENGINE_STORAGE = (function() {
     } catch(e) {}
   }
 
+  function notifyStorageChanged(key, action, bytes) {
+    try {
+      window.dispatchEvent(new CustomEvent('world-engine:storage-write', {
+        detail: {
+          key: key,
+          path: keyToPath(key),
+          action: action || 'set',
+          bytes: bytes || 0,
+          backend: getBackendName()
+        }
+      }));
+    } catch(e) {}
+  }
+
   async function pluginRequest(route, options) {
     var response = await fetch(PLUGIN_BASE + route, Object.assign({
       headers: { 'Content-Type': 'application/json' }
@@ -212,6 +226,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
       writeConfigFile(keyToPath(key), content).catch(function(e) {
         console.warn('[World Engine] Failed to write config file for key:', key, e);
       });
+      notifyStorageChanged(key, 'set', content.length);
       notifyConfigChanged(key, 'set');
       return true;
     }
@@ -219,6 +234,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
     var bucket = getFallbackBucket(true);
     bucket[key] = content;
     saveFallbackSettings();
+    notifyStorageChanged(key, 'set', content.length);
     notifyConfigChanged(key, 'set');
     return true;
   }
@@ -232,6 +248,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
       }).catch(function(e) {
         console.warn('[World Engine] Failed to remove config file for key:', key, e);
       });
+      notifyStorageChanged(key, 'remove', 0);
       notifyConfigChanged(key, 'remove');
       return true;
     }
@@ -240,6 +257,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
       delete bucket[key];
       saveFallbackSettings();
     }
+    notifyStorageChanged(key, 'remove', 0);
     notifyConfigChanged(key, 'remove');
     return true;
   }
@@ -301,6 +319,14 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return 'default';
   }
 
+  function getActiveChatId() {
+    try {
+      var ctx = getContext();
+      if (ctx && ctx.chatId) return ctx.chatId;
+    } catch(e) {}
+    return null;
+  }
+
   function appendEvolutionLog(state, entry) {
     var chatId = getChatIdFromState(state);
     var payload = Object.assign({
@@ -311,6 +337,26 @@ window.WORLD_ENGINE_STORAGE = (function() {
     if (configFolderAvailable) {
       appendConfigFile('chats/' + encodeSegment(chatId) + '/evolution.jsonl', line + '\n').catch(function(e) {
         console.warn('[World Engine] Failed to append evolution log:', e);
+      });
+    }
+    return true;
+  }
+
+  function appendLifecycleLog(entry) {
+    var payload = Object.assign({
+      timestamp: new Date().toISOString()
+    }, entry || {});
+    if (!payload.chatId) payload.chatId = getActiveChatId();
+    var line = JSON.stringify(payload);
+    if (!configFolderAvailable) return false;
+
+    appendConfigFile('logs/lifecycle.jsonl', line + '\n').catch(function(e) {
+      console.warn('[World Engine] Failed to append lifecycle log:', e);
+    });
+
+    if (payload.chatId && payload.chatId !== 'default') {
+      appendConfigFile('chats/' + encodeSegment(payload.chatId) + '/lifecycle.jsonl', line + '\n').catch(function(e) {
+        console.warn('[World Engine] Failed to append chat lifecycle log:', e);
       });
     }
     return true;
@@ -336,6 +382,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
     keyToPath: keyToPath,
     pathToKey: pathToKey,
     appendEvolutionLog: appendEvolutionLog,
+    appendLifecycleLog: appendLifecycleLog,
     getAdapter: function() { return this; },
     setAdapter: function() { return false; }
   };
