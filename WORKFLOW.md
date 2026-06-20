@@ -43,6 +43,7 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 4. Panel position, size, and the active tab are saved to `config/ui/panel-state.json`.
 5. Modal windows with a header, including preview and notification windows, can be moved by dragging the header.
 6. API, general, storage, preset, world-law, snapshot, and full import/export actions write through `WORLD_ENGINE_STORAGE`.
+7. Config-affecting saves dispatch `world-engine:config-saved` or call `WORLD_ENGINE_RUNTIME.scheduleConfigApply()`, which refreshes UI state and rebuilds the active injection context without a page reload.
 
 ## Message Workflow
 
@@ -111,7 +112,8 @@ Manual SillyTavern smoke checks:
 3. Enable `enableServerPlugins: true` and restart SillyTavern.
 4. Open a chat and confirm the World Engine panel button appears.
 5. Save settings and confirm `config/settings.json` changes.
-6. Drag and resize the panel in Firefox, close/reopen it, and confirm `config/ui/panel-state.json` changes.
-7. Create, export, import, activate, and delete a custom preset; confirm `config/presets.json` and `config/active-preset.txt` change.
-8. Send/receive one full exchange and confirm `config/chats/<chat-id>/state.json` changes.
-9. Confirm `config/chats/<chat-id>/evolution.jsonl` receives one JSON line after a successful evolution.
+6. Confirm saved settings update the active injection preview/context without refreshing the browser tab.
+7. Drag and resize the panel in Firefox, close/reopen it, and confirm `config/ui/panel-state.json` changes.
+8. Create, export, import, activate, and delete a custom preset; confirm `config/presets.json` and `config/active-preset.txt` change.
+9. Send/receive one full exchange and confirm `config/chats/<chat-id>/state.json` changes.
+10. Confirm `config/chats/<chat-id>/evolution.jsonl` receives one JSON line after a successful evolution.

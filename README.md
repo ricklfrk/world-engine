@@ -14,6 +14,7 @@ World Engine is a SillyTavern extension for long-form roleplay continuity. It tr
 - Plaintext config storage: settings, per-chat state, savepoints, and conversation evolution logs are written under `config/`.
 - Firefox-friendly UI controls: the main panel and popup windows can be moved by dragging their headers, and panel geometry is saved in `config/ui/panel-state.json`.
 - Settings, prompt presets, snapshots, and full config import/export write through the same plaintext storage adapter.
+- Saved settings, presets, worldbook selection, story/world state controls, and imports are applied immediately to the active injection context.
 
 ## Install
 

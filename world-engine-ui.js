@@ -249,6 +249,21 @@ window.WORLD_ENGINE_UI = (function() {
     });
   }
 
+  function applyConfig(reason) {
+    if (panelElement) applyPanelState(panelElement);
+    refresh();
+    return true;
+  }
+
+  function requestConfigApply(reason) {
+    applyConfig(reason || 'ui');
+    if (window.WORLD_ENGINE_RUNTIME && typeof window.WORLD_ENGINE_RUNTIME.scheduleConfigApply === 'function') {
+      window.WORLD_ENGINE_RUNTIME.scheduleConfigApply(reason || 'ui');
+    } else if (window.WORLD_ENGINE_RUNTIME && typeof window.WORLD_ENGINE_RUNTIME.applyConfig === 'function') {
+      window.WORLD_ENGINE_RUNTIME.applyConfig(reason || 'ui');
+    }
+  }
+
   function activeChat() { try {
     var c = SillyTavern.getContext();
     return c && c.characterId != null;
@@ -469,7 +484,7 @@ window.WORLD_ENGINE_UI = (function() {
 
     var html = '';
     // header
-    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.4.0</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
+    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.4.1</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
     // tab bar
     html += '<nav class="tab-bar">';
     for (var i = 0; i < ids.length; i++) {
@@ -847,6 +862,7 @@ window.WORLD_ENGINE_UI = (function() {
         core.saveState(st);
         ed.style.display = 'none'; edBtn.style.display = 'inline-block'; svBtn.style.display = 'none';
         toast('\u2705 \u4e16\u754c\u7b80\u8ff0\u5df2\u4fdd\u5b58');
+        requestConfigApply('world-description');
       });
       // quick evolve button
       var qeBtn = document.getElementById('world-engine-quick-evolve');
@@ -1294,6 +1310,7 @@ window.WORLD_ENGINE_UI = (function() {
         core.saveState(st);
         ed.style.display = 'none'; edBtn.style.display = 'inline-block'; svBtn.style.display = 'none';
         toast('\u2705 \u4e16\u754c\u7b80\u8ff0\u5df2\u4fdd\u5b58');
+        requestConfigApply('world-description');
       });
       // create faction
       var cfBtn = document.getElementById('world-engine-create-faction');
@@ -1937,6 +1954,31 @@ window.WORLD_ENGINE_UI = (function() {
         });
       }
 
+      var saveCustomInject = document.getElementById('world-engine-save-custom-inject');
+      if (saveCustomInject) {
+        saveCustomInject.addEventListener('click', function(){
+          var tmplEl = document.getElementById('world-engine-custom-inject-template');
+          var st = core.loadState();
+          st.customInjectTemplate = tmplEl ? tmplEl.value.trim() : '';
+          core.saveState(st);
+          toast(st.customInjectTemplate ? '\u2705 \u81ea\u5b9a\u4e49\u6ce8\u5165\u6a21\u677f\u5df2\u4fdd\u5b58' : '\u2705 \u81ea\u5b9a\u4e49\u6ce8\u5165\u6a21\u677f\u5df2\u6e05\u7a7a');
+          requestConfigApply('custom-inject-template');
+        });
+      }
+
+      var clearCustomInject = document.getElementById('world-engine-clear-custom-inject');
+      if (clearCustomInject) {
+        clearCustomInject.addEventListener('click', function(){
+          var tmplEl = document.getElementById('world-engine-custom-inject-template');
+          var st = core.loadState();
+          delete st.customInjectTemplate;
+          core.saveState(st);
+          if (tmplEl) tmplEl.value = '';
+          toast('\u2705 \u81ea\u5b9a\u4e49\u6ce8\u5165\u6a21\u677f\u5df2\u6e05\u9664');
+          requestConfigApply('custom-inject-template-clear');
+        });
+      }
+
       // manual evolve
       var manualBtn = document.getElementById('world-engine-manual-evolve');
       if (manualBtn) {
@@ -2004,6 +2046,7 @@ window.WORLD_ENGINE_UI = (function() {
           st.driveMode = 'manual';
           core.saveState(st);
           toast('\u26a0\ufe0f \u7d27\u6025\u505c\u6b62\u5df2\u6267\u884c\uff0c\u5df2\u5207\u6362\u4e3a\u624b\u52a8\u6a21\u5f0f');
+          requestConfigApply('emergency-stop');
           refresh();
         });
       }
@@ -2128,6 +2171,7 @@ window.WORLD_ENGINE_UI = (function() {
           if (customTone) st.storyType.customToneText = customTone.value;
           core.saveState(st);
           toast('\u2705 \u6545\u4e8b\u8bbe\u7f6e\u5df2\u4fdd\u5b58');
+          requestConfigApply('story-settings');
         });
       }
       // \u65b0\u5efa\u5267\u60c5\u7ebf\u7d22
@@ -2972,7 +3016,8 @@ window.WORLD_ENGINE_UI = (function() {
               var st = core.loadState();
               Object.assign(st, data);
               core.saveState(st);
-              toast('\u2705 \u5feb\u7167\u5df2\u5bfc\u5165\uff0c\u5237\u65b0\u9875\u9762\u751f\u6548');
+              toast('\u2705 \u5feb\u7167\u5df2\u5bfc\u5165\uff0c\u5df2\u5373\u65f6\u5e94\u7528');
+              requestConfigApply('snapshot-import');
             } catch(err){ toast('\u274c \u5bfc\u5165\u5931\u8d25\uff1a' + err.message, true); }
           };
           reader.readAsText(file);
@@ -3077,6 +3122,7 @@ window.WORLD_ENGINE_UI = (function() {
         });
         core.saveState(st);
         toast('\u2705 \u4e16\u754c\u6cd5\u5219\u5df2\u4fdd\u5b58');
+        requestConfigApply('world-law');
       });
 
       // \u4e16\u754c\u6cd5\u5219 AI \u5206\u6790
@@ -3088,6 +3134,7 @@ window.WORLD_ENGINE_UI = (function() {
         st.worldLaw.lastModifiedRound = st.round || 0;
         core.saveState(st);
         toast('\u2705 AI \u4e16\u754c\u6cd5\u5219\u5206\u6790\u5df2\u89e6\u53d1');
+        requestConfigApply('world-law-analysis');
       });
 
       // \u6dfb\u52a0\u81ea\u5b9a\u4e49\u6cd5\u5219 (id-based, Fix 5)
@@ -3103,12 +3150,13 @@ window.WORLD_ENGINE_UI = (function() {
         core.saveState(st);
         input.value = '';
         toast('\u2705 \u5df2\u6dfb\u52a0\u6cd5\u5219\uff1a' + rule);
+        requestConfigApply('world-law-rule');
       });
       var exportAll = document.getElementById('world-engine-export-all');
       if (exportAll) exportAll.addEventListener('click', function(){
         var payload = {
           schema: 'world-engine-config-export',
-          version: '3.4.0',
+          version: '3.4.1',
           exportedAt: new Date().toISOString(),
           settings: readSettings(),
           presets: readJSON(window.WORLD_ENGINE_STORAGE.getItem('world_engine_presets'), null),
@@ -3142,8 +3190,8 @@ window.WORLD_ENGINE_UI = (function() {
               if (data.worldbookSelection) window.WORLD_ENGINE_STORAGE.setItem('world_engine_worldbook_selection', JSON.stringify(data.worldbookSelection, null, 2));
               if (data.worldbookBooks) window.WORLD_ENGINE_STORAGE.setItem('world_engine_wb_books', JSON.stringify(data.worldbookBooks, null, 2));
               if (data.state) core.saveState(data.state);
-              toast('\u2705 \u5168\u90e8\u6570\u636e\u5df2\u5bfc\u5165\uff0c\u5efa\u8bae\u5237\u65b0 SillyTavern \u9875\u9762');
-              refresh();
+              toast('\u2705 \u5168\u90e8\u6570\u636e\u5df2\u5bfc\u5165\uff0c\u5df2\u5373\u65f6\u5e94\u7528');
+              requestConfigApply('full-import');
             } catch(err) {
               toast('\u274c \u5168\u90e8\u6570\u636e\u5bfc\u5165\u5931\u8d25\uff1a' + err.message, true);
             } finally {
@@ -3161,16 +3209,16 @@ window.WORLD_ENGINE_UI = (function() {
         if (!confirm('\u518d\u786e\u8ba4\u4e00\u6b21\uff1a\u8fd9\u4e2a\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002\u786e\u5b9a\u8981\u91cd\u7f6e\uff1f')) return;
         var keys = window.WORLD_ENGINE_STORAGE.keys ? window.WORLD_ENGINE_STORAGE.keys() : [];
         keys.forEach(function(key) { window.WORLD_ENGINE_STORAGE.removeItem(key); });
-        toast('\u26a0\ufe0f \u6240\u6709 World Engine \u6570\u636e\u5df2\u91cd\u7f6e\uff0c\u8bf7\u5237\u65b0\u9875\u9762');
-        refresh();
+        toast('\u26a0\ufe0f \u6240\u6709 World Engine \u6570\u636e\u5df2\u91cd\u7f6e\uff0c\u5df2\u5373\u65f6\u5e94\u7528');
+        requestConfigApply('reset-all');
       });
       // reset settings only
       var resetS = document.getElementById('world-engine-reset-settings');
       if (resetS) resetS.addEventListener('click', function(){
         if (!confirm('\u786e\u5b9a\u4ec5\u91cd\u7f6e\u8bbe\u7f6e\uff1f\u8bb0\u5fc6\u548c\u4e16\u754c\u72b6\u6001\u5c06\u4fdd\u7559\u3002')) return;
         window.WORLD_ENGINE_STORAGE.removeItem('world_engine_settings');
-        toast('\u2699\ufe0f \u8bbe\u7f6e\u5df2\u91cd\u7f6e\uff0c\u8bf7\u5237\u65b0\u9875\u9762');
-        refresh();
+        toast('\u2699\ufe0f \u8bbe\u7f6e\u5df2\u91cd\u7f6e\uff0c\u5df2\u5373\u65f6\u5e94\u7528');
+        requestConfigApply('reset-settings');
       });
     }, 50);
   }
@@ -3324,5 +3372,7 @@ window.WORLD_ENGINE_UI = (function() {
     showPanel: showPanel,
     togglePanel: togglePanel,
     makeDraggableModal: makeDraggableModal,
+    applyConfig: applyConfig,
+    requestConfigApply: requestConfigApply,
   };
 })();

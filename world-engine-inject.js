@@ -59,6 +59,15 @@ window.WORLD_ENGINE_INJECT = (function() {
     return base;
   }
 
+  function renderCustomTemplate(template, values) {
+    var raw = String(template || '').trim();
+    if (!raw) return '';
+    return raw.replace(/\{\{?\s*([a-zA-Z0-9_]+)\s*\}?\}/g, function(match, key) {
+      if (!Object.prototype.hasOwnProperty.call(values, key)) return match;
+      return values[key] == null ? '' : String(values[key]);
+    }).trim();
+  }
+
   async function buildContext(chatHistory, worldState, tags, options = {}) {
     // ★ v2.5.0: 加载预设
     const presets = window.WORLD_ENGINE_PRESETS;
@@ -429,6 +438,25 @@ window.WORLD_ENGINE_INJECT = (function() {
         echoText += '• ' + echoes[ei].name + '\n';
       }
       finalContext = echoText + '\n' + finalContext;
+    }
+
+    if (worldState.customInjectTemplate && String(worldState.customInjectTemplate).trim()) {
+      var customContext = renderCustomTemplate(worldState.customInjectTemplate, {
+        era: worldState.era || '',
+        time: worldState.timeText || '',
+        world: worldState.worldDescription || worldState.worldDigest || '',
+        worldDigest: worldState.worldDigest || '',
+        description: worldState.worldDescription || '',
+        characters: Object.keys(worldState.emotionMap || {}).join(', '),
+        memories: memoryText || '',
+        events: eventsText || '',
+        worldbook: worldbookSection || '',
+        panel: panelText || '',
+        context: finalContext || '',
+        story: worldState.storyTemplate || worldState.storyArc || '',
+        tone: worldState.storyTone || worldState.tone || ''
+      });
+      if (customContext) finalContext = customContext;
     }
 
     return finalContext;

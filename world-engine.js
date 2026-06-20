@@ -65,7 +65,7 @@
     return './plugins/world-engine';
   }
 
-  var WORLD_ENGINE_VERSION = '3.4.0';
+  var WORLD_ENGINE_VERSION = '3.4.1';
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -213,6 +213,114 @@
       let isEvolving = false;
       let lastInjectedRound = -1;
       let worldbookLoaded = false;  // Bug 1：惰性加载 worldbook
+      let isApplyingConfig = false;
+      let pendingConfigApply = false;
+      let configApplyTimer = null;
+
+      function readSettings() {
+        try { return JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings') || '{}'); }
+        catch(e) { return {}; }
+      }
+
+      function shouldReloadWorldbookForConfig(reason) {
+        var value = String(reason || '');
+        return value.indexOf('world_engine_wb_') === 0 || value === 'world_engine_worldbook_selection';
+      }
+
+      async function rebuildInjectionFromConfig(reason) {
+        if (isApplyingConfig) {
+          pendingConfigApply = reason || true;
+          return false;
+        }
+        isApplyingConfig = true;
+        try {
+          lastInjectedRound = -1;
+          const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
+          const settings = readSettings();
+
+          if (ui && typeof ui.applyConfig === 'function') {
+            ui.applyConfig(reason || 'config');
+          } else if (ui && typeof ui.refresh === 'function') {
+            ui.refresh();
+          }
+
+          if (!ctx || !Array.isArray(ctx.chat) || ctx.chat.length === 0) {
+            unregisterInjection();
+            return true;
+          }
+
+          const state = core.loadState();
+          const chatHistory = ctx.chat || [];
+
+          if (settings.injectWorldbook === true && (!worldbookLoaded || shouldReloadWorldbookForConfig(reason))) {
+            try {
+              await worldbook.loadWorldbooks();
+              worldbookLoaded = true;
+            } catch(e) {
+              console.warn('[World Engine] worldbook reload during config apply failed', e);
+            }
+          }
+
+          let tags = [];
+          try {
+            tags = await tagsGen.generatePredictionTags(chatHistory, state);
+          } catch(e) {
+            console.warn('[World Engine] tag rebuild during config apply failed', e);
+          }
+
+          let context = '';
+          try {
+            context = await inject.buildContext(chatHistory, state, tags, { includeWorldbook: settings.injectWorldbook === true });
+          } catch(e) {
+            console.warn('[World Engine] injection rebuild during config apply failed', e);
+          }
+
+          state.lastInjection = {
+            timestamp: Date.now(),
+            round: state.round,
+            context: context,
+            tagsUsed: tags,
+            reason: reason || 'config'
+          };
+          core.saveState(state);
+
+          if (context) registerInjection(context);
+          else unregisterInjection();
+
+          if (ui && typeof ui.refresh === 'function') ui.refresh();
+          console.log('[World Engine] Config applied immediately:', reason || 'config');
+          return true;
+        } finally {
+          isApplyingConfig = false;
+          if (pendingConfigApply) {
+            const nextReason = pendingConfigApply === true ? 'pending' : pendingConfigApply;
+            pendingConfigApply = false;
+            scheduleConfigApply(nextReason);
+          }
+        }
+      }
+
+      function scheduleConfigApply(reason) {
+        clearTimeout(configApplyTimer);
+        configApplyTimer = setTimeout(function() {
+          rebuildInjectionFromConfig(reason).catch(function(e) {
+            console.warn('[World Engine] immediate config apply failed', e);
+          });
+        }, 120);
+      }
+
+      window.WORLD_ENGINE_RUNTIME = {
+        applyConfig: rebuildInjectionFromConfig,
+        scheduleConfigApply: scheduleConfigApply,
+        rebuildInjection: rebuildInjectionFromConfig,
+        registerInjection: registerInjection,
+        unregisterInjection: unregisterInjection
+      };
+
+      window.addEventListener('world-engine:config-saved', function(event) {
+        const detail = event && event.detail ? event.detail : {};
+        scheduleConfigApply(detail.key || detail.path || 'config');
+      });
 
       // ========== 主API注入：在用户发送消息之前（非消息注入，改用 prompt 注入） ==========
       async function beforeMessageSend() {

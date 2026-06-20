@@ -11,6 +11,16 @@ window.WORLD_ENGINE_STORAGE = (function() {
   var configFolderAvailable = false;
   var hydratePromise = null;
 
+  var APPLY_CONFIG_KEYS = {
+    world_engine_settings: true,
+    world_engine_presets: true,
+    world_engine_active_preset: true,
+    world_engine_inject_style: true,
+    world_engine_worldbook_selection: true,
+    world_engine_wb_books: true,
+    world_engine_wb_autoActivate: true
+  };
+
   var KNOWN_KEY_PATHS = {
     world_engine_settings: 'settings.json',
     world_engine_presets: 'presets.json',
@@ -121,6 +131,20 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return String(value);
   }
 
+  function notifyConfigChanged(key, action) {
+    if (!APPLY_CONFIG_KEYS[key]) return;
+    try {
+      window.dispatchEvent(new CustomEvent('world-engine:config-saved', {
+        detail: {
+          key: key,
+          path: keyToPath(key),
+          action: action || 'set',
+          backend: getBackendName()
+        }
+      }));
+    } catch(e) {}
+  }
+
   async function pluginRequest(route, options) {
     var response = await fetch(PLUGIN_BASE + route, Object.assign({
       headers: { 'Content-Type': 'application/json' }
@@ -188,12 +212,14 @@ window.WORLD_ENGINE_STORAGE = (function() {
       writeConfigFile(keyToPath(key), content).catch(function(e) {
         console.warn('[World Engine] Failed to write config file for key:', key, e);
       });
+      notifyConfigChanged(key, 'set');
       return true;
     }
 
     var bucket = getFallbackBucket(true);
     bucket[key] = content;
     saveFallbackSettings();
+    notifyConfigChanged(key, 'set');
     return true;
   }
 
@@ -206,6 +232,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
       }).catch(function(e) {
         console.warn('[World Engine] Failed to remove config file for key:', key, e);
       });
+      notifyConfigChanged(key, 'remove');
       return true;
     }
     var bucket = getFallbackBucket(false);
@@ -213,6 +240,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
       delete bucket[key];
       saveFallbackSettings();
     }
+    notifyConfigChanged(key, 'remove');
     return true;
   }
 
