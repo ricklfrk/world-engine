@@ -72,6 +72,16 @@ window.WORLD_ENGINE_EVOLUTION = (function() {
     return u + '/v1/chat/completions';
   }
 
+  async function fetchWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs || 15000);
+    try {
+      return await fetch(url, Object.assign({}, options || {}, { signal: controller.signal }));
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   // ★ v3.1.1: 独立的自定义 API 调用（支持 OpenAI/KoboldCPP/Ooba 等非标准格式）
   async function callCustomApi(url, key, model, prompt, maxTokens, temperature) {
     const fullUrl = normalizeApiUrl(url);
@@ -98,12 +108,11 @@ window.WORLD_ENGINE_EVOLUTION = (function() {
       try {
         const altUrl = baseNoApi + '/api/v1/generate';
         if (altUrl !== fullUrl) {
-          const altResp = await fetch(altUrl, {
+          const altResp = await fetchWithTimeout(altUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': key ? ('Bearer ' + key) : '' },
-            body: JSON.stringify({ prompt: prompt, max_context_length: 4096, max_length: maxTokens, temperature: temperature }),
-            signal: AbortSignal.timeout(15000)
-          });
+            body: JSON.stringify({ prompt: prompt, max_context_length: 4096, max_length: maxTokens, temperature: temperature })
+          }, 15000);
           if (altResp.ok) {
             const altData = await altResp.json();
             if (altData.results && altData.results[0] && altData.results[0].text) return altData.results[0].text;

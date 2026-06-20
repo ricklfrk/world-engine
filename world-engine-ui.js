@@ -13,10 +13,241 @@ window.WORLD_ENGINE_UI = (function() {
   var panelVisible = false;
   var currentTab = 'overview';
   var panelElement = null;
+  var PANEL_STATE_KEY = 'world_engine_panel_state';
 
   /* ── helpers ── */
   function esc(s) { return String(s).replace(/[&<>"']/g, function(m) {
     return m === '&' ? '&amp;' : m === '<' ? '&lt;' : m === '>' ? '&gt;' : m === '"' ? '&quot;' : '&#39;'; }); }
+
+  function readJSON(raw, fallback) {
+    if (!raw) return fallback;
+    try { return JSON.parse(raw); } catch(e) { return fallback; }
+  }
+
+  function readSettings() {
+    return readJSON(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings'), {});
+  }
+
+  function saveSettings(settings) {
+    window.WORLD_ENGINE_STORAGE.setItem('world_engine_settings', JSON.stringify(settings || {}, null, 2));
+  }
+
+  function readPanelState() {
+    return readJSON(window.WORLD_ENGINE_STORAGE.getItem(PANEL_STATE_KEY), {});
+  }
+
+  function savePanelStatePatch(patch) {
+    var state = readPanelState();
+    for (var key in patch) state[key] = patch[key];
+    try { window.WORLD_ENGINE_STORAGE.setItem(PANEL_STATE_KEY, JSON.stringify(state, null, 2)); } catch(e) {}
+  }
+
+  function downloadJson(filename, data) {
+    var blob = new Blob([typeof data === 'string' ? data : JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function fetchWithTimeout(url, options, timeoutMs) {
+    options = options || {};
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, timeoutMs || 5000);
+    var opts = Object.assign({}, options, { signal: controller.signal });
+    return fetch(url, opts).finally(function() { clearTimeout(timer); });
+  }
+
+  function viewport() {
+    return {
+      w: Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0),
+      h: Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0)
+    };
+  }
+
+  function clamp(value, min, max) {
+    if (max < min) max = min;
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function getPoint(e) {
+    var src = e;
+    if (e.touches && e.touches.length) src = e.touches[0];
+    else if (e.changedTouches && e.changedTouches.length) src = e.changedTouches[0];
+    return { x: src.clientX || 0, y: src.clientY || 0 };
+  }
+
+  function isInteractiveTarget(target) {
+    return !!(target && target.closest && target.closest('button,input,select,textarea,a,label,.tab-btn,.hdr-close,.world-engine-resize-handle'));
+  }
+
+  function clampBoxToViewport(width, height, left, top) {
+    var vp = viewport();
+    var margin = 8;
+    return {
+      left: clamp(left, margin, vp.w - Math.min(width, vp.w - margin * 2) - margin),
+      top: clamp(top, margin, vp.h - Math.min(height, vp.h - margin * 2) - margin)
+    };
+  }
+
+  function savePanelGeometry(panel) {
+    if (!panel) return;
+    var rect = panel.getBoundingClientRect();
+    savePanelStatePatch({
+      left: Math.round(rect.left) + 'px',
+      top: Math.round(rect.top) + 'px',
+      width: Math.round(rect.width) + 'px',
+      height: Math.round(rect.height) + 'px',
+      tab: currentTab
+    });
+  }
+
+  function applyPanelState(panel) {
+    if (!panel) return;
+    var state = readPanelState();
+    if (state.width) panel.style.width = state.width;
+    if (state.height) panel.style.height = state.height;
+    if (state.left || state.top) {
+      panel.style.left = state.left || panel.style.left || '20px';
+      panel.style.top = state.top || panel.style.top || '80px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    }
+    if (state.tab && document.getElementById('tab-' + state.tab)) currentTab = state.tab;
+    if (panel.style.display !== 'none') {
+      var rect = panel.getBoundingClientRect();
+      if (rect.width && rect.height) {
+        var pos = clampBoxToViewport(rect.width, rect.height, rect.left, rect.top);
+        panel.style.left = Math.round(pos.left) + 'px';
+        panel.style.top = Math.round(pos.top) + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+      }
+    }
+  }
+
+  function bindDrag(handle, target, options) {
+    if (!handle || !target || handle.__worldEngineDragBound) return;
+    handle.__worldEngineDragBound = true;
+    options = options || {};
+    var dragging = false;
+    var start = null;
+    var startRect = null;
+
+    function begin(e) {
+      if (dragging) return;
+      if (e.button !== undefined && e.button !== 0) return;
+      if (options.ignoreInteractive !== false && isInteractiveTarget(e.target)) return;
+      start = getPoint(e);
+      startRect = target.getBoundingClientRect();
+      dragging = true;
+      document.documentElement.classList.add('world-engine-dragging');
+      if (options.prepare) options.prepare(target, startRect);
+      if (e.cancelable) e.preventDefault();
+      addMoveListeners();
+    }
+
+    function move(e) {
+      if (!dragging) return;
+      var p = getPoint(e);
+      if (options.onMove) options.onMove(target, startRect, p.x - start.x, p.y - start.y);
+      if (e.cancelable) e.preventDefault();
+    }
+
+    function end() {
+      if (!dragging) return;
+      dragging = false;
+      document.documentElement.classList.remove('world-engine-dragging');
+      removeMoveListeners();
+      if (options.onEnd) options.onEnd(target);
+    }
+
+    function addMoveListeners() {
+      document.addEventListener('mousemove', move, false);
+      document.addEventListener('mouseup', end, false);
+      document.addEventListener('touchmove', move, { passive: false });
+      document.addEventListener('touchend', end, false);
+      document.addEventListener('touchcancel', end, false);
+      document.addEventListener('pointermove', move, false);
+      document.addEventListener('pointerup', end, false);
+      document.addEventListener('pointercancel', end, false);
+    }
+
+    function removeMoveListeners() {
+      document.removeEventListener('mousemove', move, false);
+      document.removeEventListener('mouseup', end, false);
+      document.removeEventListener('touchmove', move, false);
+      document.removeEventListener('touchend', end, false);
+      document.removeEventListener('touchcancel', end, false);
+      document.removeEventListener('pointermove', move, false);
+      document.removeEventListener('pointerup', end, false);
+      document.removeEventListener('pointercancel', end, false);
+    }
+
+    handle.addEventListener('mousedown', begin, false);
+    handle.addEventListener('touchstart', begin, { passive: false });
+    handle.addEventListener('pointerdown', begin, false);
+  }
+
+  function enablePanelWindow(panel) {
+    if (!panel || panel.__worldEngineWindowBound) return;
+    panel.__worldEngineWindowBound = true;
+    bindDrag(panel.querySelector('.hdr'), panel, {
+      onMove: function(el, rect, dx, dy) {
+        var pos = clampBoxToViewport(rect.width, rect.height, rect.left + dx, rect.top + dy);
+        el.style.left = Math.round(pos.left) + 'px';
+        el.style.top = Math.round(pos.top) + 'px';
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+      },
+      onEnd: savePanelGeometry
+    });
+  }
+
+  function enablePanelResize(panel, handle) {
+    bindDrag(handle, panel, {
+      ignoreInteractive: false,
+      onMove: function(el, rect, dx, dy) {
+        var vp = viewport();
+        var minW = Math.min(360, vp.w - 16);
+        var minH = Math.min(300, vp.h - 16);
+        var maxW = Math.max(minW, vp.w - rect.left - 8);
+        var maxH = Math.max(minH, vp.h - rect.top - 8);
+        el.style.width = Math.round(clamp(rect.width + dx, minW, maxW)) + 'px';
+        el.style.height = Math.round(clamp(rect.height + dy, minH, maxH)) + 'px';
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+      },
+      onEnd: savePanelGeometry
+    });
+  }
+
+  function makeDraggableModal(root, options) {
+    if (!root || root.__worldEngineModalDragBound) return;
+    options = options || {};
+    var box = root.querySelector(options.boxSelector || '.world-engine-modal-box');
+    var handle = root.querySelector(options.handleSelector || '.world-engine-modal-hdr');
+    if (!box || !handle) return;
+    root.__worldEngineModalDragBound = true;
+    bindDrag(handle, box, {
+      prepare: function(el, rect) {
+        el.style.position = 'fixed';
+        el.style.left = Math.round(rect.left) + 'px';
+        el.style.top = Math.round(rect.top) + 'px';
+        el.style.width = Math.round(rect.width) + 'px';
+        el.style.margin = '0';
+      },
+      onMove: function(el, rect, dx, dy) {
+        var pos = clampBoxToViewport(rect.width, rect.height, rect.left + dx, rect.top + dy);
+        el.style.left = Math.round(pos.left) + 'px';
+        el.style.top = Math.round(pos.top) + 'px';
+      }
+    });
+  }
 
   function activeChat() { try {
     var c = SillyTavern.getContext();
@@ -105,6 +336,7 @@ window.WORLD_ENGINE_UI = (function() {
     overlay.className = 'world-engine-modal-overlay';
     overlay.innerHTML = '<div class="world-engine-modal-box"><div class="world-engine-modal-hdr">⚠️ 半自动模式预览</div><div class="world-engine-modal-body"><p style="margin-bottom:8px;color:#8b949e;font-size:11px;">以下是本轮推演的预览结果，请确认是否执行：</p><div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;font-size:12px;color:#e6edf3;max-height:200px;overflow-y:auto;line-height:1.7;">'+esc(evolvePreviewText)+'</div></div><div class="world-engine-modal-actions"><button class="btn btn-success" id="world-engine-semi-confirm">✅ 确认执行</button><button class="btn" id="world-engine-semi-skip">⏭ 跳过此轮</button><button class="btn btn-danger" id="world-engine-semi-cancel">✖ 取消</button></div></div>';
     document.body.appendChild(overlay);
+    makeDraggableModal(overlay);
     document.getElementById('world-engine-semi-confirm').addEventListener('click', function(){ overlay.remove(); if (onConfirm) onConfirm(); });
     document.getElementById('world-engine-semi-skip').addEventListener('click', function(){ overlay.remove(); if (onSkip) onSkip(); });
     document.getElementById('world-engine-semi-cancel').addEventListener('click', function(){ overlay.remove(); });
@@ -129,6 +361,7 @@ window.WORLD_ENGINE_UI = (function() {
     }).join('') : '<div style="padding:8px;color:#8b949e;font-size:11px;">暂无通知</div>';
     overlay.innerHTML = '<div class="world-engine-modal-box" style="max-width:420px;"><div class="world-engine-modal-hdr">🔔 通知历史 <span style="font-size:11px;color:#8b949e;font-weight:400;">最近 '+items.length+'条</span></div><div class="world-engine-modal-body" style="max-height:320px;overflow-y:auto;">'+listHtml+'</div><div class="world-engine-modal-actions"><button class="btn btn-sm" id="world-engine-notif-close" style="margin-left:auto;">✖ 关闭</button></div></div>';
     document.body.appendChild(overlay);
+    makeDraggableModal(overlay);
     document.getElementById('world-engine-notif-close').addEventListener('click', function(){ overlay.remove(); });
     overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
   }
@@ -236,7 +469,7 @@ window.WORLD_ENGINE_UI = (function() {
 
     var html = '';
     // header
-    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.3.0</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
+    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.4.0</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
     // tab bar
     html += '<nav class="tab-bar">';
     for (var i = 0; i < ids.length; i++) {
@@ -253,27 +486,12 @@ window.WORLD_ENGINE_UI = (function() {
       var rh = document.createElement('div');
       rh.className = 'world-engine-resize-handle';
       panel.appendChild(rh);
-      var isResizing = false, startX, startY, startW, startH;
-      rh.addEventListener('mousedown', function(e) {
-        isResizing = true;
-        startX = e.clientX; startY = e.clientY;
-        var rect = panel.getBoundingClientRect();
-        startW = rect.width; startH = rect.height;
-        e.preventDefault();
-      });
-      document.addEventListener('mousemove', function(e) {
-        if (!isResizing) return;
-        var w = Math.max(400, startW + (e.clientX - startX));
-        var h = Math.max(300, startH + (e.clientY - startY));
-        panel.style.width = w + 'px';
-        panel.style.height = h + 'px';
-        panel.style.bottom = '';
-        panel.style.right = '';
-      });
-      document.addEventListener('mouseup', function(){ isResizing = false; });
+      enablePanelResize(panel, rh);
     })();
     document.body.appendChild(panel);
     panelElement = panel;
+    enablePanelWindow(panel);
+    applyPanelState(panel);
 
     // events
     panel.addEventListener('click', function(e) {
@@ -342,22 +560,29 @@ window.WORLD_ENGINE_UI = (function() {
   function showPanel() {
     if (!panelElement) return;
     panelElement.style.display = 'flex';
+    panelElement.classList.add('show');
     panelVisible = true;
+    applyPanelState(panelElement);
+    switchTab(currentTab);
     refresh();
   }
   function hidePanel() {
     if (!panelElement) return;
     panelElement.style.display = 'none';
+    panelElement.classList.remove('show');
     panelVisible = false;
+    savePanelGeometry(panelElement);
   }
   function resetUI() {
     panelVisible = false;
     currentTab = 'overview';
     if (panelElement) panelElement.style.display = 'none';
+    if (panelElement) panelElement.classList.remove('show');
   }
 
   function switchTab(tabId) {
     currentTab = tabId;
+    savePanelStatePatch({ tab: currentTab });
     if (!panelElement) return;
     panelElement.querySelectorAll('.tab-btn').forEach(function(b) {
       b.classList.toggle('active', b.dataset.tab === tabId);
@@ -1537,7 +1762,7 @@ window.WORLD_ENGINE_UI = (function() {
 
   /* ═══════════════════ ENGINE ═══════════════════ */
   function renderEngine(cont, state) {
-    var settings = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings') || '{}');
+    var settings = readSettings();
     var driveMode = state.driveMode || settings.driveMode || 'ai';
     var evolveInterval = settings.evolveInterval || 3;
 
@@ -2518,7 +2743,14 @@ window.WORLD_ENGINE_UI = (function() {
 
   /* ═══════════════════ SETTINGS ═══════════════════ */
   function renderSettings(cont) {
-    var settings = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings') || '{}');
+    var settings = readSettings();
+    var stateForSettings = core.loadState();
+    function selected(value, current) { return value === current ? ' selected' : ''; }
+    function checked(value) { return value ? ' checked' : ''; }
+    function numValue(value, fallback) {
+      var n = parseInt(value, 10);
+      return isNaN(n) ? fallback : n;
+    }
 
     var html = '';
     html += '<div class="save-bar"><div class="hint">\u26a0\ufe0f \u66f4\u6539\u8bbe\u7f6e\u540e\u52a1\u5fc5\u70b9\u51fb <b>\u300c\u4fdd\u5b58\u300d</b> \u6309\u94ae\u624d\u4f1a\u751f\u6548\u3002\u6bcf\u4e2a\u533a\u57df\u6709\u72ec\u7acb\u4fdd\u5b58\u6309\u94ae\u3002</div>';
@@ -2527,7 +2759,7 @@ window.WORLD_ENGINE_UI = (function() {
     // API
     html += '<div class="card"><div class="card-title">\ud83d\udd0c API \u8fde\u63a5 <span class="bdg">\u5fc5\u987b\u914d\u7f6e</span></div><div class="fr">';
     html += '<div class="fg"><label>API \u7c7b\u578b</label><select id="world-engine-api-type">';
-    ['OpenAI (ChatGPT)','KoboldCPP','TextGen WebUI (Ooba)','Claude API','\u81ea\u5b9a\u4e49'].forEach(function(t){ html += '<option'+(t==='KoboldCPP'?' selected':'')+'>'+t+'</option>'; });
+    ['OpenAI (ChatGPT)','KoboldCPP','TextGen WebUI (Ooba)','Claude API','\u81ea\u5b9a\u4e49'].forEach(function(t){ html += '<option'+selected(t, settings.apiType || 'KoboldCPP')+'>'+t+'</option>'; });
     html += '</select></div>';
     html += '<div class="fg"><label>API \u5730\u5740</label><input type="url" id="world-engine-api-url" value="'+esc(settings.apiUrl||'http://localhost:5001/api')+'"></div></div>';
     html += '<div class="fr"><div class="fg"><label>API Key</label><input type="password" id="world-engine-api-key" value="'+(settings.apiKey||'')+'"></div>';
@@ -2537,18 +2769,18 @@ window.WORLD_ENGINE_UI = (function() {
 
     // general
     html += '<div class="card"><div class="card-title">\u2699\ufe0f \u901a\u7528\u8bbe\u7f6e</div><div class="fr">';
-    html += '<div class="fg"><label>\u8bed\u8a00</label><select id="world-engine-lang"><option selected>\u4e2d\u6587</option><option>English</option><option>\u65e5\u672c\u8a9e</option></select></div>';
-    html += '<div class="fg"><label>\u6210\u5c31\u901a\u77e5</label><select id="world-engine-ach-notify"><option selected>\u5168\u90e8\u901a\u77e5</option><option>\u4ec5\u7a00\u6709\u53ca\u4ee5\u4e0a</option><option>\u5173\u95ed</option></select></div></div>';
-    html += '<div class="flex"><span class="tw"><label class="tg"><input type="checkbox" id="world-engine-auto-load" checked><span class="s"></span></label><span class="sm">\u542f\u52a8\u65f6\u81ea\u52a8\u52a0\u8f7d\u4e16\u754c\u72b6\u6001</span></span>';
-    html += '<span class="tw"><label class="tg"><input type="checkbox" id="world-engine-nsfw-ach"><span class="s"></span></label><span class="sm">\u663e\u793a NSFW \u6210\u5c31</span></span></div>';
+    html += '<div class="fg"><label>\u8bed\u8a00</label><select id="world-engine-lang"><option'+selected('\u4e2d\u6587', settings.language || '\u4e2d\u6587')+'>\u4e2d\u6587</option><option'+selected('English', settings.language)+'>English</option><option'+selected('\u65e5\u672c\u8a9e', settings.language)+'>\u65e5\u672c\u8a9e</option></select></div>';
+    html += '<div class="fg"><label>\u6210\u5c31\u901a\u77e5</label><select id="world-engine-ach-notify"><option'+selected('\u5168\u90e8\u901a\u77e5', settings.achievementNotify || '\u5168\u90e8\u901a\u77e5')+'>\u5168\u90e8\u901a\u77e5</option><option'+selected('\u4ec5\u7a00\u6709\u53ca\u4ee5\u4e0a', settings.achievementNotify)+'>\u4ec5\u7a00\u6709\u53ca\u4ee5\u4e0a</option><option'+selected('\u5173\u95ed', settings.achievementNotify)+'>\u5173\u95ed</option></select></div></div>';
+    html += '<div class="flex"><span class="tw"><label class="tg"><input type="checkbox" id="world-engine-auto-load"'+checked(settings.autoLoad !== false)+'><span class="s"></span></label><span class="sm">\u542f\u52a8\u65f6\u81ea\u52a8\u52a0\u8f7d\u4e16\u754c\u72b6\u6001</span></span>';
+    html += '<span class="tw"><label class="tg"><input type="checkbox" id="world-engine-nsfw-ach"'+checked(!!(stateForSettings.achievements && stateForSettings.achievements.showNSFW))+'><span class="s"></span></label><span class="sm">\u663e\u793a NSFW \u6210\u5c31</span></span></div>';
     html += '<div class="fa"><button class="btn btn-primary" id="world-engine-save-general">\ud83d\udcbe \u4fdd\u5b58\u901a\u7528\u8bbe\u7f6e</button></div></div>';
 
     // data & storage
     html += '<div class="card"><div class="card-title">\ud83d\udcbe \u6570\u636e & \u5b58\u50a8</div><div class="fr">';
-    html += '<div class="fg"><label>\u70ed\u8bb0\u5fc6\u9608\u503c\uff08\u8f6e\u6570\uff09</label><input type="number" id="world-engine-hot-threshold" value="50"></div>';
-    html += '<div class="fg"><label>\u81ea\u52a8\u5907\u4efd\u95f4\u9694</label><select id="world-engine-backup-interval"><option>\u6bcf 5 \u8f6e</option><option selected>\u6bcf 10 \u8f6e</option><option>\u6bcf 20 \u8f6e</option><option>\u5173\u95ed</option></select></div></div>';
-    html += '<div class="fr"><div class="fg"><label>\u6700\u5927\u8bb0\u5fc6\u6570\u91cf</label><input type="number" id="world-engine-max-memory" value="500"></div>';
-    html += '<div class="fg"><label>AI \u81ea\u52a8\u6210\u5c31\u751f\u6210</label><select id="world-engine-auto-ach"><option selected>\u5f00\u542f\uff08\u6700\u591a 50 \u4e2a\uff09</option><option>\u5173\u95ed</option></select></div></div>';
+    html += '<div class="fg"><label>\u70ed\u8bb0\u5fc6\u9608\u503c\uff08\u8f6e\u6570\uff09</label><input type="number" id="world-engine-hot-threshold" value="'+numValue(settings.hotMemoryThreshold, 50)+'"></div>';
+    html += '<div class="fg"><label>\u81ea\u52a8\u5907\u4efd\u95f4\u9694</label><select id="world-engine-backup-interval"><option'+selected('\u6bcf 5 \u8f6e', settings.backupInterval)+'>\u6bcf 5 \u8f6e</option><option'+selected('\u6bcf 10 \u8f6e', settings.backupInterval || '\u6bcf 10 \u8f6e')+'>\u6bcf 10 \u8f6e</option><option'+selected('\u6bcf 20 \u8f6e', settings.backupInterval)+'>\u6bcf 20 \u8f6e</option><option'+selected('\u5173\u95ed', settings.backupInterval)+'>\u5173\u95ed</option></select></div></div>';
+    html += '<div class="fr"><div class="fg"><label>\u6700\u5927\u8bb0\u5fc6\u6570\u91cf</label><input type="number" id="world-engine-max-memory" value="'+numValue(settings.maxMemories, 500)+'"></div>';
+    html += '<div class="fg"><label>AI \u81ea\u52a8\u6210\u5c31\u751f\u6210</label><select id="world-engine-auto-ach"><option'+selected('\u5f00\u542f\uff08\u6700\u591a 50 \u4e2a\uff09', settings.autoAchievements === false ? '' : '\u5f00\u542f\uff08\u6700\u591a 50 \u4e2a\uff09')+'>\u5f00\u542f\uff08\u6700\u591a 50 \u4e2a\uff09</option><option'+selected('\u5173\u95ed', settings.autoAchievements === false ? '\u5173\u95ed' : '')+'>\u5173\u95ed</option></select></div></div>';
     html += '<div class="fa"><button class="btn btn-primary" id="world-engine-save-storage">\ud83d\udcbe \u4fdd\u5b58\u5b58\u50a8\u8bbe\u7f6e</button>';
     html += '<button class="btn btn-success" id="world-engine-export-snapshot">\ud83d\udce6 \u5bfc\u51fa\u5feb\u7167</button>';
     html += '<button class="btn" id="world-engine-import-snapshot">\ud83d\udce5 \u5bfc\u5165\u5feb\u7167</button></div>';
@@ -2558,9 +2790,17 @@ window.WORLD_ENGINE_UI = (function() {
     html += '<div class="flex"><span class="sm gray">\u6700\u8fd1\u5feb\u7167\uff1a' + autoBackups.length + ' \u4e2a\u4fdd\u5b58\u70b9</span><span class="sm gray">\u6700\u540e\u5907\u4efd\uff1a\u7b2c ' + lastBakRound + ' \u8f6e</span></div></div>';
 
     // \u9884\u8bbe\u7ba1\u7406
-    var currentPreset = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings')||'{}').activePreset||'\u6807\u51c6\u9884\u8bbe';
-    html += '<div class="card"><div class="card-title">\ud83d\udce6 \u9884\u8bbe\u7ba1\u7406 <span class="bdg">\u5f53\u524d: '+esc(currentPreset)+'</span></div><div class="fr">';
-    html += '<div class="fg"><label>\u5f53\u524d\u9884\u8bbe</label><select id="world-engine-preset-select"><option selected>'+esc(currentPreset)+'</option></select></div>';
+    var presetsApi = window.WORLD_ENGINE_PRESETS;
+    var presetList = presetsApi && presetsApi.listPresets ? presetsApi.listPresets() : [{ id: 'standard', name: '\u6807\u51c6\u9884\u8bbe' }];
+    var activePreset = presetsApi && presetsApi.getActivePreset ? presetsApi.getActivePreset() : null;
+    var currentPresetId = (activePreset && activePreset.id) || window.WORLD_ENGINE_STORAGE.getItem('world_engine_active_preset') || 'standard';
+    var currentPresetName = (activePreset && activePreset.name) || currentPresetId;
+    html += '<div class="card"><div class="card-title">\ud83d\udce6 \u9884\u8bbe\u7ba1\u7406 <span class="bdg">\u5f53\u524d: '+esc(currentPresetName)+'</span></div><div class="fr">';
+    html += '<div class="fg"><label>\u5f53\u524d\u9884\u8bbe</label><select id="world-engine-preset-select">';
+    presetList.forEach(function(p) {
+      html += '<option value="'+esc(p.id)+'"'+selected(p.id, currentPresetId)+'>'+esc(p.name || p.id)+'</option>';
+    });
+    html += '</select></div>';
     html += '<div class="fg"><label>\u521b\u5efa\u65b0\u9884\u8bbe</label><div class="flex"><input type="text" id="world-engine-new-preset-name" placeholder="\u8f93\u5165\u9884\u8bbe\u540d\u79f0..." style="flex:1;padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:12px;"><button class="btn btn-sm" id="world-engine-create-preset">\u2795 \u521b\u5efa</button></div></div></div>';
     html += '<div class="fa"><button class="btn btn-primary" id="world-engine-save-preset">\ud83d\udcbe \u4fdd\u5b58\u9884\u8bbe</button><button class="btn btn-sm" id="world-engine-export-preset">\ud83d\udce4 \u5bfc\u51fa\u9884\u8bbe</button><button class="btn btn-sm" id="world-engine-import-preset">\ud83d\udce5 \u5bfc\u5165\u9884\u8bbe</button><button class="btn btn-danger btn-sm" id="world-engine-delete-preset">\ud83d\uddd1\ufe0f \u5220\u9664\u9884\u8bbe</button></div></div>';
 
@@ -2635,14 +2875,16 @@ window.WORLD_ENGINE_UI = (function() {
 
       var saveApi = document.getElementById('world-engine-save-api');
       if (saveApi) saveApi.addEventListener('click', function(){
-        var s = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings') || '{}');
+        var s = readSettings();
+        var typeEl = document.getElementById('world-engine-api-type');
         var urlEl = document.getElementById('world-engine-api-url');
         var keyEl = document.getElementById('world-engine-api-key');
         var modelEl = document.getElementById('world-engine-api-model');
+        if (typeEl) s.apiType = typeEl.value;
         if (urlEl) s.apiUrl = urlEl.value;
         if (keyEl) s.apiKey = keyEl.value;
         if (modelEl) s.apiModel = modelEl.value;
-        window.WORLD_ENGINE_STORAGE.setItem('world_engine_settings', JSON.stringify(s));
+        saveSettings(s);
         toast('\u2705 API \u8bbe\u7f6e\u5df2\u4fdd\u5b58');
       });
 
@@ -2664,7 +2906,7 @@ window.WORLD_ENGINE_UI = (function() {
         } catch(e) {
           // try koboldcpp style
           try {
-            var resp2 = await fetch(apiUrl, { method: 'GET', signal: AbortSignal.timeout(5000) });
+            var resp2 = await fetchWithTimeout(apiUrl, { method: 'GET' }, 5000);
             if (resp2.ok) { toast('\u2705 API \u8fde\u63a5\u6210\u529f\uff01'); } else { toast('\u26a0\ufe0f \u8fde\u63a5\u5931\u8d25: ' + resp2.status, true); }
           } catch(e2) { toast('\u274c \u65e0\u6cd5\u8fde\u63a5 API: ' + e2.message, true); }
         }
@@ -2672,19 +2914,46 @@ window.WORLD_ENGINE_UI = (function() {
       });
 
       var saveGen = document.getElementById('world-engine-save-general');
-      if (saveGen) saveGen.addEventListener('click', function(){ toast('\u2705 \u901a\u7528\u8bbe\u7f6e\u5df2\u4fdd\u5b58'); });
+      if (saveGen) saveGen.addEventListener('click', function(){
+        var s = readSettings();
+        var langEl = document.getElementById('world-engine-lang');
+        var notifyEl = document.getElementById('world-engine-ach-notify');
+        var autoLoadEl = document.getElementById('world-engine-auto-load');
+        var nsfwEl = document.getElementById('world-engine-nsfw-ach');
+        if (langEl) s.language = langEl.value;
+        if (notifyEl) s.achievementNotify = notifyEl.value;
+        if (autoLoadEl) s.autoLoad = autoLoadEl.checked;
+        saveSettings(s);
+        var st = core.loadState();
+        if (!st.achievements) st.achievements = {};
+        if (nsfwEl) st.achievements.showNSFW = nsfwEl.checked;
+        core.saveState(st);
+        toast('\u2705 \u901a\u7528\u8bbe\u7f6e\u5df2\u4fdd\u5b58');
+      });
 
       var saveSto = document.getElementById('world-engine-save-storage');
-      if (saveSto) saveSto.addEventListener('click', function(){ toast('\u2705 \u5b58\u50a8\u8bbe\u7f6e\u5df2\u4fdd\u5b58'); });
+      if (saveSto) saveSto.addEventListener('click', function(){
+        var s = readSettings();
+        var hotEl = document.getElementById('world-engine-hot-threshold');
+        var backupEl = document.getElementById('world-engine-backup-interval');
+        var maxEl = document.getElementById('world-engine-max-memory');
+        var autoAchEl = document.getElementById('world-engine-auto-ach');
+        if (hotEl) s.hotMemoryThreshold = Math.max(1, parseInt(hotEl.value || '50', 10) || 50);
+        if (backupEl) s.backupInterval = backupEl.value;
+        if (maxEl) s.maxMemories = Math.max(10, parseInt(maxEl.value || '500', 10) || 500);
+        if (autoAchEl) s.autoAchievements = autoAchEl.value !== '\u5173\u95ed';
+        saveSettings(s);
+        var st = core.loadState();
+        if (!st.achievements) st.achievements = {};
+        if (autoAchEl) st.achievements.autoGenEnabled = autoAchEl.value !== '\u5173\u95ed';
+        core.saveState(st);
+        toast('\u2705 \u5b58\u50a8\u8bbe\u7f6e\u5df2\u4fdd\u5b58');
+      });
 
       var exportSnap = document.getElementById('world-engine-export-snapshot');
       if (exportSnap) exportSnap.addEventListener('click', function(){
         var st = core.loadState();
-        var blob = new Blob([JSON.stringify(st, null, 2)], {type:'application/json'});
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'world-engine-snapshot-'+new Date().toISOString().slice(0,19).replace(/[:-]/g,'')+'.json';
-        a.click();
+        downloadJson('world-engine-snapshot-'+new Date().toISOString().slice(0,19).replace(/[:-]/g,'')+'.json', st);
         toast('\ud83d\udce6 \u5feb\u7167\u5df2\u5bfc\u51fa');
       });
 
@@ -2714,29 +2983,40 @@ window.WORLD_ENGINE_UI = (function() {
       // \u9884\u8bbe\u7ba1\u7406\u6309\u94ae
       var savePreset = document.getElementById('world-engine-save-preset');
       if (savePreset) savePreset.addEventListener('click', function(){
-        var s = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings')||'{}');
-        s.activePreset = document.getElementById('world-engine-preset-select') ? document.getElementById('world-engine-preset-select').value : '\u6807\u51c6\u9884\u8bbe';
-        window.WORLD_ENGINE_STORAGE.setItem('world_engine_settings', JSON.stringify(s));
-        toast('\u2705 \u9884\u8bbe\u5df2\u4fdd\u5b58');
+        var sel = document.getElementById('world-engine-preset-select');
+        var presetId = sel ? sel.value : 'standard';
+        var ok = presetsApi && presetsApi.setActivePreset ? presetsApi.setActivePreset(presetId) : false;
+        var s = readSettings();
+        s.activePreset = presetId;
+        saveSettings(s);
+        toast(ok ? '\u2705 \u9884\u8bbe\u5df2\u4fdd\u5b58' : '\u26a0\ufe0f \u9884\u8bbe\u5df2\u5199\u5165\u8bbe\u7f6e\uff0c\u4f46 preset API \u672a\u786e\u8ba4', !ok);
       });
       var createPreset = document.getElementById('world-engine-create-preset');
       if (createPreset) createPreset.addEventListener('click', function(){
         var name = document.getElementById('world-engine-new-preset-name');
         if (name && name.value.trim()) {
           var sel = document.getElementById('world-engine-preset-select');
-          if (sel) { var opt = document.createElement('option'); opt.value = name.value.trim(); opt.textContent = name.value.trim(); opt.selected = true; sel.appendChild(opt); }
-          toast('\u2705 \u5df2\u521b\u5efa\u9884\u8bbe\uff1a' + name.value.trim());
+          var baseId = sel ? sel.value : 'standard';
+          var preset = presetsApi && presetsApi.createPreset ? presetsApi.createPreset(name.value.trim(), baseId) : null;
+          if (preset && sel) {
+            var opt = document.createElement('option');
+            opt.value = preset.id;
+            opt.textContent = preset.name || preset.id;
+            opt.selected = true;
+            sel.appendChild(opt);
+            if (presetsApi.setActivePreset) presetsApi.setActivePreset(preset.id);
+          }
+          toast(preset ? '\u2705 \u5df2\u521b\u5efa\u9884\u8bbe\uff1a' + (preset.name || name.value.trim()) : '\u274c \u9884\u8bbe\u521b\u5efa\u5931\u8d25', !preset);
           name.value = '';
         }
       });
       var exportPreset = document.getElementById('world-engine-export-preset');
       if (exportPreset) exportPreset.addEventListener('click', function(){
-        var s = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings')||'{}');
-        var blob = new Blob([JSON.stringify(s, null, 2)], {type:'application/json'});
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'world-engine-preset-'+new Date().toISOString().slice(0,19).replace(/[:-]/g,'')+'.json';
-        a.click();
+        var sel = document.getElementById('world-engine-preset-select');
+        var presetId = sel ? sel.value : 'standard';
+        var json = presetsApi && presetsApi.exportPreset ? presetsApi.exportPreset(presetId) : null;
+        if (!json) { toast('\u274c \u9884\u8bbe\u5bfc\u51fa\u5931\u8d25', true); return; }
+        downloadJson('world-engine-preset-'+presetId+'-'+new Date().toISOString().slice(0,19).replace(/[:-]/g,'')+'.json', json);
         toast('\ud83d\udce4 \u9884\u8bbe\u5df2\u5bfc\u51fa');
       });
       var importPreset = document.getElementById('world-engine-import-preset');
@@ -2749,8 +3029,17 @@ window.WORLD_ENGINE_UI = (function() {
           var reader = new FileReader();
           reader.onload = function(ev){
             try {
-              var data = JSON.parse(ev.target.result);
-              window.WORLD_ENGINE_STORAGE.setItem('world_engine_settings', JSON.stringify(data));
+              var result = presetsApi && presetsApi.importPreset ? presetsApi.importPreset(ev.target.result) : { success: false, error: 'Preset API unavailable' };
+              if (!result.success) throw new Error(result.error || '\u5bfc\u5165\u5931\u8d25');
+              var sel = document.getElementById('world-engine-preset-select');
+              if (sel && result.preset) {
+                var opt = document.createElement('option');
+                opt.value = result.preset.id;
+                opt.textContent = result.preset.name || result.preset.id;
+                opt.selected = true;
+                sel.appendChild(opt);
+              }
+              if (presetsApi.setActivePreset && result.preset) presetsApi.setActivePreset(result.preset.id);
               toast('\u2705 \u9884\u8bbe\u5df2\u5bfc\u5165');
             } catch(err){ toast('\u274c \u5bfc\u5165\u5931\u8d25\uff1a' + err.message, true); }
           };
@@ -2761,7 +3050,16 @@ window.WORLD_ENGINE_UI = (function() {
       var deletePreset = document.getElementById('world-engine-delete-preset');
       if (deletePreset) deletePreset.addEventListener('click', function(){
         if (!confirm('\u786e\u5b9a\u5220\u9664\u5f53\u524d\u9884\u8bbe\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002')) return;
-        toast('\u2705 \u9884\u8bbe\u5df2\u5220\u9664');
+        var sel = document.getElementById('world-engine-preset-select');
+        var presetId = sel ? sel.value : '';
+        var ok = presetsApi && presetsApi.deletePreset ? presetsApi.deletePreset(presetId) : false;
+        if (ok && sel) {
+          var opt = sel.querySelector('option[value="'+presetId.replace(/"/g, '\\"')+'"]');
+          if (opt) opt.remove();
+          sel.value = 'standard';
+          if (presetsApi.setActivePreset) presetsApi.setActivePreset('standard');
+        }
+        toast(ok ? '\u2705 \u9884\u8bbe\u5df2\u5220\u9664' : '\u26a0\ufe0f \u7cfb\u7edf\u9884\u8bbe\u4e0d\u53ef\u5220\u9664', !ok);
       });
 
       var saveWl = document.getElementById('world-engine-save-wl');
@@ -2806,12 +3104,63 @@ window.WORLD_ENGINE_UI = (function() {
         input.value = '';
         toast('\u2705 \u5df2\u6dfb\u52a0\u6cd5\u5219\uff1a' + rule);
       });
-      // reset all data — double confirmation
+      var exportAll = document.getElementById('world-engine-export-all');
+      if (exportAll) exportAll.addEventListener('click', function(){
+        var payload = {
+          schema: 'world-engine-config-export',
+          version: '3.4.0',
+          exportedAt: new Date().toISOString(),
+          settings: readSettings(),
+          presets: readJSON(window.WORLD_ENGINE_STORAGE.getItem('world_engine_presets'), null),
+          activePreset: window.WORLD_ENGINE_STORAGE.getItem('world_engine_active_preset') || null,
+          injectStyle: window.WORLD_ENGINE_STORAGE.getItem('world_engine_inject_style') || null,
+          panelState: readPanelState(),
+          worldbookSelection: readJSON(window.WORLD_ENGINE_STORAGE.getItem('world_engine_worldbook_selection'), null),
+          worldbookBooks: readJSON(window.WORLD_ENGINE_STORAGE.getItem('world_engine_wb_books'), null),
+          state: core.loadState()
+        };
+        downloadJson('world-engine-full-export-'+new Date().toISOString().slice(0,19).replace(/[:-]/g,'')+'.json', payload);
+        toast('\ud83d\udce4 \u5168\u90e8\u6570\u636e\u5df2\u5bfc\u51fa');
+      });
+
+      var importAll = document.getElementById('world-engine-import-all');
+      var importFile = document.getElementById('world-engine-import-file');
+      if (importAll && importFile) {
+        importAll.addEventListener('click', function(){ importFile.click(); });
+        importFile.addEventListener('change', function(e){
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function(ev) {
+            try {
+              var data = JSON.parse(ev.target.result);
+              if (data.settings) saveSettings(data.settings);
+              if (data.presets) window.WORLD_ENGINE_STORAGE.setItem('world_engine_presets', JSON.stringify(data.presets, null, 2));
+              if (data.activePreset) window.WORLD_ENGINE_STORAGE.setItem('world_engine_active_preset', data.activePreset);
+              if (data.injectStyle) window.WORLD_ENGINE_STORAGE.setItem('world_engine_inject_style', data.injectStyle);
+              if (data.panelState) window.WORLD_ENGINE_STORAGE.setItem(PANEL_STATE_KEY, JSON.stringify(data.panelState, null, 2));
+              if (data.worldbookSelection) window.WORLD_ENGINE_STORAGE.setItem('world_engine_worldbook_selection', JSON.stringify(data.worldbookSelection, null, 2));
+              if (data.worldbookBooks) window.WORLD_ENGINE_STORAGE.setItem('world_engine_wb_books', JSON.stringify(data.worldbookBooks, null, 2));
+              if (data.state) core.saveState(data.state);
+              toast('\u2705 \u5168\u90e8\u6570\u636e\u5df2\u5bfc\u5165\uff0c\u5efa\u8bae\u5237\u65b0 SillyTavern \u9875\u9762');
+              refresh();
+            } catch(err) {
+              toast('\u274c \u5168\u90e8\u6570\u636e\u5bfc\u5165\u5931\u8d25\uff1a' + err.message, true);
+            } finally {
+              importFile.value = '';
+            }
+          };
+          reader.readAsText(file);
+        });
+      }
+
+      // reset all data - double confirmation
       var resetAll = document.getElementById('world-engine-reset-all');
       if (resetAll) resetAll.addEventListener('click', function(){
         if (!confirm('\u786e\u5b9a\u91cd\u7f6e\u6240\u6709 World Engine \u6570\u636e\uff1f\u8fd9\u5c06\u6e05\u9664\u5168\u90e8\u8bb0\u5fc6\u3001\u6210\u5c31\u3001\u4e16\u754c\u72b6\u6001\u3001\u60c5\u611f\u6570\u636e\u3002')) return;
         if (!confirm('\u518d\u786e\u8ba4\u4e00\u6b21\uff1a\u8fd9\u4e2a\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002\u786e\u5b9a\u8981\u91cd\u7f6e\uff1f')) return;
-        window.WORLD_ENGINE_STORAGE.removeItem('world_engine_state');
+        var keys = window.WORLD_ENGINE_STORAGE.keys ? window.WORLD_ENGINE_STORAGE.keys() : [];
+        keys.forEach(function(key) { window.WORLD_ENGINE_STORAGE.removeItem(key); });
         toast('\u26a0\ufe0f \u6240\u6709 World Engine \u6570\u636e\u5df2\u91cd\u7f6e\uff0c\u8bf7\u5237\u65b0\u9875\u9762');
         refresh();
       });
@@ -2974,5 +3323,6 @@ window.WORLD_ENGINE_UI = (function() {
     hidePanel: hidePanel,
     showPanel: showPanel,
     togglePanel: togglePanel,
+    makeDraggableModal: makeDraggableModal,
   };
 })();

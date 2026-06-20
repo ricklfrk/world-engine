@@ -2,7 +2,7 @@
   "display_name": "World Engine",
   "author": "World Engine",
   "description": "Roleplay world engine: memory driven, worldbook driven, and state driven.",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "license": "MIT",
   "type": "extension",
   "js": "world-engine.js",

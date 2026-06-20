@@ -12,6 +12,8 @@ World Engine is a SillyTavern extension for long-form roleplay continuity. It tr
 - UI panel for world state, memory, story, worldbook, settings, snapshots, and achievements.
 - Enhancement layer for undo, recycle bin, dashboards, relation graphs, API monitor, weather/season, and scheduled evolution.
 - Plaintext config storage: settings, per-chat state, savepoints, and conversation evolution logs are written under `config/`.
+- Firefox-friendly UI controls: the main panel and popup windows can be moved by dragging their headers, and panel geometry is saved in `config/ui/panel-state.json`.
+- Settings, prompt presets, snapshots, and full config import/export write through the same plaintext storage adapter.
 
 ## Install
 
@@ -23,6 +25,8 @@ World Engine has a UI extension and a server plugin. The server plugin is requir
 4. Restart SillyTavern so the `World Engine` server plugin loads.
 5. Enable `World Engine` from the extensions panel.
 6. Open the World Engine panel and configure API settings if AI evolution or analysis is needed.
+
+Firefox is supported. If Firefox keeps an old script after updating, restart SillyTavern and reload the tab; the extension also appends the current World Engine version to loaded script URLs.
 
 ## Runtime Data
 

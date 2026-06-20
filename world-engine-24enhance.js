@@ -1071,6 +1071,9 @@
       '</div></div>';
     overlay.innerHTML = html;
     document.body.appendChild(overlay);
+    if (window.WORLD_ENGINE_UI && typeof window.WORLD_ENGINE_UI.makeDraggableModal === 'function') {
+      window.WORLD_ENGINE_UI.makeDraggableModal(overlay, { boxSelector: '.card', handleSelector: '.card-title' });
+    }
 
     document.getElementById('world-engine-preview-confirm').addEventListener('click', function() {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
@@ -1420,6 +1423,9 @@
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
+    if (window.WORLD_ENGINE_UI && typeof window.WORLD_ENGINE_UI.makeDraggableModal === 'function') {
+      window.WORLD_ENGINE_UI.makeDraggableModal(overlay, { boxSelector: '.world-engine-entry-preview-modal', handleSelector: '.world-engine-entry-preview-header' });
+    }
     overlay.addEventListener('click', function(e) {
       if (e.target === overlay || e.target.id === 'world-engine-close-preview') {
         overlay.parentNode.removeChild(overlay);

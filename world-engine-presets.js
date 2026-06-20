@@ -247,19 +247,63 @@ window.WORLD_ENGINE_PRESETS = (function() {
   }
 
   // ==================== 预设加载 ====================
+  function clonePreset(preset) {
+    return JSON.parse(JSON.stringify(preset));
+  }
+
+  function getBuiltinPresetIds() {
+    var ids = {};
+    getDefaultPresets().forEach(function(p) { ids[p.id] = true; });
+    return ids;
+  }
+
+  function normalizeStoredPresets(stored) {
+    if (Array.isArray(stored)) return stored;
+    if (stored && Array.isArray(stored.presets)) return stored.presets;
+    return null;
+  }
+
   function getDefaultPresetsRef() {
     return getDefaultPresets();
   }
 
   function loadPresets() {
     var defaults = getDefaultPresets();
-    return [JSON.parse(JSON.stringify(defaults[0]))];
+    var stored = normalizeStoredPresets(loadPresetsFromStorage());
+    if (!stored || !stored.length) return defaults.map(clonePreset);
+
+    var builtinIds = getBuiltinPresetIds();
+    var byId = {};
+    stored.forEach(function(p) {
+      if (p && p.id) byId[p.id] = p;
+    });
+
+    var result = defaults.map(function(def) {
+      return clonePreset(byId[def.id] || def);
+    });
+
+    stored.forEach(function(p) {
+      if (p && p.id && !builtinIds[p.id]) result.push(clonePreset(p));
+    });
+
+    return result;
   }
 
   // ==================== 激活的预设 ====================
   function getActivePreset() {
-    var defaults = getDefaultPresets();
-    return JSON.parse(JSON.stringify(defaults[0]));
+    var all = loadPresets();
+    var activeId = null;
+    try { activeId = window.WORLD_ENGINE_STORAGE.getItem(ACTIVE_KEY); } catch(e) {}
+    if (!activeId) {
+      try {
+        var settings = JSON.parse(window.WORLD_ENGINE_STORAGE.getItem('world_engine_settings') || '{}');
+        activeId = settings.activePreset || null;
+      } catch(e) {}
+    }
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].id === activeId || all[i].name === activeId) return clonePreset(all[i]);
+    }
+    return clonePreset(all[0]);
   }
 
   function setActivePreset(presetId) {
@@ -330,7 +374,7 @@ window.WORLD_ENGINE_PRESETS = (function() {
   function deletePreset(presetId) {
     var all = loadPresets();
     // 不允许删除内置预设
-    var builtinIds = { default: true };
+    var builtinIds = getBuiltinPresetIds();
     if (builtinIds[presetId]) return false;
 
     var idx = -1;
@@ -392,7 +436,7 @@ window.WORLD_ENGINE_PRESETS = (function() {
         return { success: false, error: '无效的预设格式：缺少 id/labels/sections' };
       }
       // 确保不覆盖内置预设
-      var builtinIds = { default: true };
+      var builtinIds = getBuiltinPresetIds();
       if (builtinIds[data.id]) {
         // 导入为自定义
         data.id = 'imported_' + Date.now();

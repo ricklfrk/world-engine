@@ -37,6 +37,9 @@
   flex-shrink: 0;
   cursor: move;
   user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 .hdr h1 {
   font-size: 18px;
@@ -70,6 +73,35 @@
   transition: color .2s;
 }
 .hdr-close:hover { color: #f85149; }
+
+.world-engine-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.world-engine-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #8b949e;
+  border-bottom: 2px solid #8b949e;
+  opacity: .65;
+}
+html.world-engine-dragging,
+html.world-engine-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -moz-user-select: none !important;
+  -webkit-user-select: none !important;
+}
 
 /* ── Tab 栏 ── */
 .tab-bar {
@@ -1311,6 +1343,11 @@ body.shell-mobile .world-engine-panel {
   color: #f0c040;
   padding: 14px 16px 8px;
   border-bottom: 1px solid #21262d;
+  cursor: move;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 .world-engine-modal-body {
   padding: 12px 16px;
@@ -1324,6 +1361,15 @@ body.shell-mobile .world-engine-panel {
   gap: 6px;
   justify-content: flex-end;
   border-top: 1px solid #21262d;
+}
+
+.world-engine-preview-modal .card-title,
+.world-engine-entry-preview-header {
+  cursor: move;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
 /* ── 演化摘要弹窗 ── */

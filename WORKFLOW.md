@@ -35,6 +35,15 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 5. If the server plugin is available, storage hydrates cached values from `/api/plugins/world-engine/list` and `/api/plugins/world-engine/file`.
 6. The UI is built, slash commands are registered, and SillyTavern chat events are subscribed.
 
+## UI Workflow
+
+1. The main panel is opened from the SillyTavern input bar globe button.
+2. The panel header can be dragged in Firefox and Chromium browsers.
+3. The bottom-right resize handle adjusts panel size on desktop.
+4. Panel position, size, and the active tab are saved to `config/ui/panel-state.json`.
+5. Modal windows with a header, including preview and notification windows, can be moved by dragging the header.
+6. API, general, storage, preset, world-law, snapshot, and full import/export actions write through `WORLD_ENGINE_STORAGE`.
+
 ## Message Workflow
 
 ### Before User Message Sends
@@ -102,5 +111,7 @@ Manual SillyTavern smoke checks:
 3. Enable `enableServerPlugins: true` and restart SillyTavern.
 4. Open a chat and confirm the World Engine panel button appears.
 5. Save settings and confirm `config/settings.json` changes.
-6. Send/receive one full exchange and confirm `config/chats/<chat-id>/state.json` changes.
-7. Confirm `config/chats/<chat-id>/evolution.jsonl` receives one JSON line after a successful evolution.
+6. Drag and resize the panel in Firefox, close/reopen it, and confirm `config/ui/panel-state.json` changes.
+7. Create, export, import, activate, and delete a custom preset; confirm `config/presets.json` and `config/active-preset.txt` change.
+8. Send/receive one full exchange and confirm `config/chats/<chat-id>/state.json` changes.
+9. Confirm `config/chats/<chat-id>/evolution.jsonl` receives one JSON line after a successful evolution.
