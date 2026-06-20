@@ -1,11 +1,30 @@
-// world-engine-storage.js - storage adapter without browser cache dependency
+// world-engine-storage.js - plaintext config folder storage adapter
 // ============================================================
 
 window.WORLD_ENGINE_STORAGE = (function() {
   'use strict';
 
   var NAMESPACE = 'world_engine';
+  var PLUGIN_BASE = '/api/plugins/world-engine';
+  var cache = {};
   var memoryStore = {};
+  var configFolderAvailable = false;
+  var hydratePromise = null;
+
+  var KNOWN_KEY_PATHS = {
+    world_engine_settings: 'settings.json',
+    world_engine_presets: 'presets.json',
+    world_engine_active_preset: 'active-preset.txt',
+    world_engine_inject_style: 'inject-style.txt',
+    world_engine_worldbook_selection: 'worldbook/entry-selection.json',
+    world_engine_wb_books: 'worldbook/books.json',
+    world_engine_wb_autoActivate: 'worldbook/auto-activate.txt',
+    world_engine_notification_history: 'notifications.json',
+    world_engine_ach_sort: 'ui/achievement-sort.txt',
+    world_engine_panel_state: 'ui/panel-state.json',
+    world_engine_auto_backups: 'backups.json',
+    world_engine_config: 'config.json'
+  };
 
   function getContext() {
     try {
@@ -30,40 +49,71 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return null;
   }
 
-  function saveSettings() {
-    try {
-      var ctx = getContext();
-      if (ctx && typeof ctx.saveSettingsDebounced === 'function') {
-        ctx.saveSettingsDebounced();
-        return;
-      }
-      if (ctx && typeof ctx.saveSettings === 'function') {
-        ctx.saveSettings();
-        return;
-      }
-      if (typeof window.saveSettingsDebounced === 'function') {
-        window.saveSettingsDebounced();
-      }
-    } catch(e) {
-      console.warn('[World Engine] Failed to save extension settings', e);
-    }
-  }
-
-  function getBucket(create) {
+  function getFallbackBucket(create) {
     var root = getExtensionSettingsRoot();
     if (!root) return memoryStore;
-
     if (!root[NAMESPACE] || typeof root[NAMESPACE] !== 'object') {
       if (!create) return {};
       root[NAMESPACE] = {};
     }
-
-    var ns = root[NAMESPACE];
-    if (!ns.kv || typeof ns.kv !== 'object') {
+    if (!root[NAMESPACE].kv || typeof root[NAMESPACE].kv !== 'object') {
       if (!create) return {};
-      ns.kv = {};
+      root[NAMESPACE].kv = {};
     }
-    return ns.kv;
+    return root[NAMESPACE].kv;
+  }
+
+  function saveFallbackSettings() {
+    try {
+      var ctx = getContext();
+      if (ctx && typeof ctx.saveSettingsDebounced === 'function') return ctx.saveSettingsDebounced();
+      if (ctx && typeof ctx.saveSettings === 'function') return ctx.saveSettings();
+      if (typeof window.saveSettingsDebounced === 'function') return window.saveSettingsDebounced();
+    } catch(e) {
+      console.warn('[World Engine] Failed to save fallback extension settings', e);
+    }
+  }
+
+  function encodeSegment(value) {
+    return encodeURIComponent(String(value || 'default')).replace(/[!'()*]/g, function(ch) {
+      return '%' + ch.charCodeAt(0).toString(16).toUpperCase();
+    });
+  }
+
+  function decodeSegment(value) {
+    try { return decodeURIComponent(value); } catch(e) { return value; }
+  }
+
+  function keyToPath(key) {
+    if (KNOWN_KEY_PATHS[key]) return KNOWN_KEY_PATHS[key];
+    if (key.indexOf('world_engine_config_') === 0) {
+      return 'chats/' + encodeSegment(key.substring('world_engine_config_'.length)) + '/config.json';
+    }
+    if (key.indexOf('world_enginesavepoint_') === 0) {
+      return 'chats/' + encodeSegment(key.substring('world_enginesavepoint_'.length)) + '/savepoints.json';
+    }
+    if (key.indexOf('world_engine_') === 0) {
+      return 'chats/' + encodeSegment(key.substring('world_engine_'.length)) + '/state.json';
+    }
+    return 'kv/' + encodeSegment(key) + '.txt';
+  }
+
+  function pathToKey(filePath) {
+    var path = String(filePath || '').replace(/\\/g, '/');
+    var known = Object.keys(KNOWN_KEY_PATHS);
+    for (var i = 0; i < known.length; i++) {
+      if (KNOWN_KEY_PATHS[known[i]] === path) return known[i];
+    }
+    var chatMatch = path.match(/^chats\/([^/]+)\/(state|config|savepoints)\.json$/);
+    if (chatMatch) {
+      var chatId = decodeSegment(chatMatch[1]);
+      if (chatMatch[2] === 'state') return 'world_engine_' + chatId;
+      if (chatMatch[2] === 'config') return 'world_engine_config_' + chatId;
+      if (chatMatch[2] === 'savepoints') return 'world_enginesavepoint_' + chatId;
+    }
+    var kvMatch = path.match(/^kv\/(.+)\.txt$/);
+    if (kvMatch) return decodeSegment(kvMatch[1]);
+    return null;
   }
 
   function normalizeValue(value) {
@@ -71,94 +121,139 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return String(value);
   }
 
-  function createSillyTavernSettingsAdapter() {
-    return {
-      getItem: function(key) {
-        try {
-          var bucket = getBucket(false);
-          return Object.prototype.hasOwnProperty.call(bucket, key) ? bucket[key] : null;
-        } catch(e) {
-          return null;
-        }
-      },
-      setItem: function(key, value) {
-        try {
-          var bucket = getBucket(true);
-          bucket[key] = normalizeValue(value);
-          saveSettings();
-          return true;
-        } catch(e) {
-          return false;
-        }
-      },
-      removeItem: function(key) {
-        try {
-          var bucket = getBucket(false);
-          if (Object.prototype.hasOwnProperty.call(bucket, key)) {
-            delete bucket[key];
-            saveSettings();
+  async function pluginRequest(route, options) {
+    var response = await fetch(PLUGIN_BASE + route, Object.assign({
+      headers: { 'Content-Type': 'application/json' }
+    }, options || {}));
+    if (!response.ok) {
+      throw new Error('World Engine plugin HTTP ' + response.status + ' for ' + route);
+    }
+    return response.json();
+  }
+
+  async function readConfigFile(path) {
+    var data = await pluginRequest('/file?path=' + encodeURIComponent(path), { method: 'GET' });
+    return typeof data.content === 'string' ? data.content : null;
+  }
+
+  async function writeConfigFile(path, content) {
+    return pluginRequest('/file', {
+      method: 'PUT',
+      body: JSON.stringify({ path: path, content: normalizeValue(content) })
+    });
+  }
+
+  async function appendConfigFile(path, content) {
+    return pluginRequest('/append', {
+      method: 'POST',
+      body: JSON.stringify({ path: path, content: normalizeValue(content) })
+    });
+  }
+
+  async function initConfigFolder() {
+    if (hydratePromise) return hydratePromise;
+    hydratePromise = (async function() {
+      try {
+        await pluginRequest('/status', { method: 'GET' });
+        configFolderAvailable = true;
+        var listed = await pluginRequest('/list', { method: 'GET' });
+        var files = Array.isArray(listed.files) ? listed.files : [];
+        for (var i = 0; i < files.length; i++) {
+          var path = files[i].path || files[i];
+          var key = pathToKey(path);
+          if (!key) continue;
+          try {
+            var content = await readConfigFile(path);
+            if (content !== null) cache[key] = content;
+          } catch(e) {
+            console.warn('[World Engine] Failed to hydrate config file:', path, e);
           }
-          return true;
-        } catch(e) {
-          return false;
         }
-      },
-      clear: function() {
-        try {
-          var bucket = getBucket(false);
-          Object.keys(bucket).forEach(function(key) {
-            if (key.indexOf('engine') === 0) delete bucket[key];
-          });
-          saveSettings();
-          return true;
-        } catch(e) {
-          return false;
-        }
-      },
-      keys: function() {
-        try {
-          var bucket = getBucket(false);
-          return Object.keys(bucket).filter(function(key) { return key.indexOf('engine') === 0; });
-        } catch(e) {
-          return [];
-        }
-      },
-      backend: function() {
-        return getExtensionSettingsRoot() ? 'sillytavern-extension-settings' : 'memory';
+        console.log('[World Engine] Config folder storage ready:', files.length, 'files');
+        return true;
+      } catch(e) {
+        configFolderAvailable = false;
+        console.warn('[World Engine] Config folder server plugin unavailable; using fallback memory/settings store.', e.message || e);
+        return false;
       }
-    };
+    })();
+    return hydratePromise;
   }
 
-  var adapter = createSillyTavernSettingsAdapter();
+  function writeThrough(key, value) {
+    var content = normalizeValue(value);
+    cache[key] = content;
 
-  function getAdapter() {
-    return adapter;
-  }
-
-  function setAdapter(nextAdapter) {
-    if (nextAdapter && typeof nextAdapter.getItem === 'function' && typeof nextAdapter.setItem === 'function') {
-      adapter = nextAdapter;
+    if (configFolderAvailable) {
+      writeConfigFile(keyToPath(key), content).catch(function(e) {
+        console.warn('[World Engine] Failed to write config file for key:', key, e);
+      });
       return true;
     }
-    return false;
+
+    var bucket = getFallbackBucket(true);
+    bucket[key] = content;
+    saveFallbackSettings();
+    return true;
+  }
+
+  function removeThrough(key) {
+    delete cache[key];
+    if (configFolderAvailable) {
+      pluginRequest('/file', {
+        method: 'DELETE',
+        body: JSON.stringify({ path: keyToPath(key) })
+      }).catch(function(e) {
+        console.warn('[World Engine] Failed to remove config file for key:', key, e);
+      });
+      return true;
+    }
+    var bucket = getFallbackBucket(false);
+    if (Object.prototype.hasOwnProperty.call(bucket, key)) {
+      delete bucket[key];
+      saveFallbackSettings();
+    }
+    return true;
+  }
+
+  function getItem(key) {
+    if (Object.prototype.hasOwnProperty.call(cache, key)) return cache[key];
+    var bucket = getFallbackBucket(false);
+    return Object.prototype.hasOwnProperty.call(bucket, key) ? bucket[key] : null;
+  }
+
+  function setItem(key, value) {
+    try { return writeThrough(key, value); } catch(e) { return false; }
+  }
+
+  function removeItem(key) {
+    try { return removeThrough(key); } catch(e) { return false; }
+  }
+
+  function clear() {
+    Object.keys(cache).forEach(function(key) {
+      if (key.indexOf('world_engine') === 0 || key.indexOf('engine') === 0) removeThrough(key);
+    });
+    return true;
+  }
+
+  function keys() {
+    var all = {};
+    Object.keys(getFallbackBucket(false)).forEach(function(key) { all[key] = true; });
+    Object.keys(cache).forEach(function(key) { all[key] = true; });
+    return Object.keys(all).filter(function(key) {
+      return key.indexOf('world_engine') === 0 || key.indexOf('engine') === 0;
+    });
   }
 
   function getJSON(key) {
-    var raw = adapter.getItem(key);
+    var raw = getItem(key);
     if (!raw) return null;
     try { return JSON.parse(raw); } catch(e) { return null; }
   }
 
   function setJSON(key, data) {
-    return adapter.setItem(key, JSON.stringify(data));
-  }
-
-  function remove(key) {
-    return adapter.removeItem(key);
-  }
-
-  function getKeys() {
-    return adapter.keys();
+    return setItem(key, JSON.stringify(data, null, 2));
   }
 
   function getKey(prefix, chatId, suffix) {
@@ -169,22 +264,51 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return parts.join('_');
   }
 
+  function getChatIdFromState(state) {
+    if (state && state.lastUpdated && state.lastUpdated.chatId) return state.lastUpdated.chatId;
+    try {
+      var ctx = getContext();
+      if (ctx && ctx.chatId) return ctx.chatId;
+    } catch(e) {}
+    return 'default';
+  }
+
+  function appendEvolutionLog(state, entry) {
+    var chatId = getChatIdFromState(state);
+    var payload = Object.assign({
+      timestamp: new Date().toISOString(),
+      chatId: chatId
+    }, entry || {});
+    var line = JSON.stringify(payload);
+    if (configFolderAvailable) {
+      appendConfigFile('chats/' + encodeSegment(chatId) + '/evolution.jsonl', line + '\n').catch(function(e) {
+        console.warn('[World Engine] Failed to append evolution log:', e);
+      });
+    }
+    return true;
+  }
+
   function getBackendName() {
-    return typeof adapter.backend === 'function' ? adapter.backend() : 'custom';
+    return configFolderAvailable ? 'config-folder' : (getExtensionSettingsRoot() ? 'fallback-extension-settings' : 'fallback-memory');
   }
 
   return {
-    getAdapter: getAdapter,
-    setAdapter: setAdapter,
-    getItem: function(key) { return adapter.getItem(key); },
-    setItem: function(key, value) { return adapter.setItem(key, value); },
-    removeItem: function(key) { return adapter.removeItem(key); },
-    clear: function() { return adapter.clear(); },
+    initConfigFolder: initConfigFolder,
+    getBackendName: getBackendName,
+    getItem: getItem,
+    setItem: setItem,
+    removeItem: removeItem,
+    clear: clear,
+    keys: keys,
+    getKeys: keys,
     getJSON: getJSON,
     setJSON: setJSON,
-    remove: remove,
-    getKeys: getKeys,
+    remove: removeItem,
     getKey: getKey,
-    getBackendName: getBackendName,
+    keyToPath: keyToPath,
+    pathToKey: pathToKey,
+    appendEvolutionLog: appendEvolutionLog,
+    getAdapter: function() { return this; },
+    setAdapter: function() { return false; }
   };
 })();

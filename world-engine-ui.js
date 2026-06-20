@@ -236,7 +236,7 @@ window.WORLD_ENGINE_UI = (function() {
 
     var html = '';
     // header
-    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.2.0</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
+    html += '<div class="hdr"><h1>\u25c8 World Engine</h1><span class="v">v3.3.0</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="world-engine-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="world-engine-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
     // tab bar
     html += '<nav class="tab-bar">';
     for (var i = 0; i < ids.length; i++) {

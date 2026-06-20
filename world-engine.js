@@ -65,7 +65,7 @@
     return './plugins/world-engine';
   }
 
-  var WORLD_ENGINE_VERSION = '3.2.0';
+  var WORLD_ENGINE_VERSION = '3.3.0';
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -187,6 +187,10 @@
       }
 
       // v3.0.0: 强制刷新 CSS 缓存
+      if (window.WORLD_ENGINE_STORAGE && typeof window.WORLD_ENGINE_STORAGE.initConfigFolder === 'function') {
+        await window.WORLD_ENGINE_STORAGE.initConfigFolder();
+      }
+
       reloadCSS();
 
       const core = window.WORLD_ENGINE_CORE;

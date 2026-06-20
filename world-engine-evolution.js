@@ -728,6 +728,18 @@ ${retryHint}
         }
       }
       // v2.3.0：保存本次演化原始结果（含 timeEstimateMinutes）
+      if (window.WORLD_ENGINE_STORAGE && typeof window.WORLD_ENGINE_STORAGE.appendEvolutionLog === 'function') {
+        window.WORLD_ENGINE_STORAGE.appendEvolutionLog(state, {
+          type: 'evolution',
+          round: state.round,
+          userMessage: userMsg,
+          assistantMessage: aiMsg,
+          rawResult: rawResult,
+          parsedUpdate: update,
+          validationWarnings: validation.warnings || []
+        });
+      }
+
       state.lastEvolveResult = update;
       core.saveState(state);
       return true;
