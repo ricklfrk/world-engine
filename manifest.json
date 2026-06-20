@@ -1,0 +1,18 @@
+{
+  "display_name": "World Engine",
+  "author": "World Engine",
+  "description": "Roleplay world engine: memory driven, worldbook driven, and state driven.",
+  "version": "3.2.0",
+  "license": "MIT",
+  "type": "extension",
+  "js": "world-engine.js",
+  "css": "style.css",
+  "download": "https://github.com/ricklfrk/world-engine/archive/refs/heads/main.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ricklfrk/world-engine.git"
+  },
+  "tags": ["world", "memory", "evolution", "rpg", "lorebook", "achievement"],
+  "category": "roleplay",
+  "minSTVersion": "1.11.0"
+}
