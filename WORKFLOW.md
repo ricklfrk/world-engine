@@ -103,6 +103,7 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 Run these before release:
 
 ```powershell
+npm test
 Get-ChildItem -Filter *.js | ForEach-Object { node --check $_.FullName }
 node --check index.js
 node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"

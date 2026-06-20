@@ -55,6 +55,7 @@ Firefox is supported. If Firefox keeps an old script after updating, restart Sil
 ## Verification
 
 ```powershell
+npm test
 Get-ChildItem -Filter *.js | ForEach-Object { node --check $_.FullName }
 node --check index.js
 node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
