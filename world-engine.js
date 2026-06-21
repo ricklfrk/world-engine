@@ -67,7 +67,7 @@
     return './plugins/world-engine';
   }
 
-  var WORLD_ENGINE_VERSION = '3.4.3';
+  var WORLD_ENGINE_VERSION = '3.4.4';
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -246,14 +246,35 @@
         await window.WORLD_ENGINE_STORAGE.initConfigFolder();
       }
 
+      var storageBackend = window.WORLD_ENGINE_STORAGE && window.WORLD_ENGINE_STORAGE.getBackendName ? window.WORLD_ENGINE_STORAGE.getBackendName() : '';
+      var serverStatus = null;
+      try {
+        serverStatus = window.WORLD_ENGINE_STORAGE && window.WORLD_ENGINE_STORAGE.getServerStatus ? window.WORLD_ENGINE_STORAGE.getServerStatus() : null;
+      } catch(e) {}
+      var serverVersion = serverStatus && serverStatus.pluginVersion ? String(serverStatus.pluginVersion) : '';
+
       if (window.WORLD_ENGINE_LOGGER && typeof window.WORLD_ENGINE_LOGGER.init === 'function') {
         window.WORLD_ENGINE_LOGGER.init({
           version: WORLD_ENGINE_VERSION,
-          backend: window.WORLD_ENGINE_STORAGE && window.WORLD_ENGINE_STORAGE.getBackendName ? window.WORLD_ENGINE_STORAGE.getBackendName() : ''
+          backend: storageBackend,
+          serverVersion: serverVersion
         });
       }
+
+      if (storageBackend === 'config-folder') {
+        if (!serverVersion) {
+          console.warn('[World Engine] Server plugin version is missing. Sync plugins/world-engine and restart SillyTavern.');
+          logLifecycle('storage.version.missing', { frontendVersion: WORLD_ENGINE_VERSION, backend: storageBackend }, 'warn');
+        } else if (serverVersion !== WORLD_ENGINE_VERSION) {
+          console.warn('[World Engine] Version mismatch. Frontend:', WORLD_ENGINE_VERSION, 'Server plugin:', serverVersion, 'Sync plugins/world-engine and restart SillyTavern.');
+          logLifecycle('storage.version.mismatch', { frontendVersion: WORLD_ENGINE_VERSION, serverVersion: serverVersion, backend: storageBackend }, 'warn');
+        }
+      }
+
       logLifecycle('storage.init.done', {
-        backend: window.WORLD_ENGINE_STORAGE && window.WORLD_ENGINE_STORAGE.getBackendName ? window.WORLD_ENGINE_STORAGE.getBackendName() : ''
+        backend: storageBackend,
+        serverVersion: serverVersion,
+        configDir: serverStatus && serverStatus.configDir ? serverStatus.configDir : ''
       });
 
       reloadCSS();

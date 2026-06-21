@@ -30,6 +30,14 @@ World Engine has a UI extension and a server plugin. The server plugin is requir
 
 Firefox is supported. If Firefox keeps an old script after updating, restart SillyTavern and reload the tab; the extension also appends the current World Engine version to loaded script URLs.
 
+## Updates
+
+SillyTavern's extension updater only updates the UI extension folder, for example `extensions/world-engine`. It does not update `plugins/world-engine`.
+
+When a release changes `index.js`, `package.json`, or any server-plugin behavior, sync the code files into `plugins/world-engine` as a separate step and restart SillyTavern. Do not overwrite `plugins/world-engine/config`, because that folder contains runtime state, logs, and per-chat files.
+
+The frontend checks `/api/plugins/world-engine/status` during boot. If the server plugin is missing a version or the frontend and server plugin versions differ, World Engine writes a lifecycle warning so the mismatch is visible in the logs.
+
 ## Runtime Data
 
 - Global settings: `config/settings.json`

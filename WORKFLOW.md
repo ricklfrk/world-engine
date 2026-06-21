@@ -33,8 +33,22 @@ Runtime data is plaintext-first. The browser UI extension calls `WORLD_ENGINE_ST
 2. The loader resolves the extension base URL and loads all browser modules in dependency order.
 3. Each module attaches a namespaced API to `window`, for example `window.WORLD_ENGINE_CORE`.
 4. `WORLD_ENGINE_STORAGE.initConfigFolder()` probes `/api/plugins/world-engine/status`.
-5. If the server plugin is available, storage hydrates cached values from `/api/plugins/world-engine/list` and `/api/plugins/world-engine/file`.
-6. The UI is built, slash commands are registered, and SillyTavern chat events are subscribed.
+5. The server plugin returns its `pluginVersion`, `storageApiVersion`, and `configDir`.
+6. If the server plugin is available, storage hydrates cached values from `/api/plugins/world-engine/list` and `/api/plugins/world-engine/file`.
+7. The browser loader compares the UI version with the server plugin version and writes a lifecycle warning if `plugins/world-engine` is stale or missing version metadata.
+8. The UI is built, slash commands are registered, and SillyTavern chat events are subscribed.
+
+## Update Workflow
+
+SillyTavern's extension updater only updates the UI extension under `extensions/world-engine`. It does not update the server plugin under `plugins/world-engine`.
+
+When updating World Engine:
+
+1. Update or pull `extensions/world-engine` through SillyTavern or Git.
+2. Sync code files into `plugins/world-engine` separately.
+3. Never overwrite `plugins/world-engine/config`; it contains runtime state, logs, and per-chat files.
+4. Restart SillyTavern after changing `plugins/world-engine/index.js` or server-plugin metadata.
+5. Confirm `/api/plugins/world-engine/status` reports the same `pluginVersion` as the UI version.
 
 ## UI Workflow
 

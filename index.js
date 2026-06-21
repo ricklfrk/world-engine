@@ -7,12 +7,23 @@ const path = require('path');
 
 const CONFIG_DIR = path.join(__dirname, 'config');
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
+const FALLBACK_VERSION = '3.4.4';
+const STORAGE_API_VERSION = 1;
 
 const info = {
   id: 'world-engine',
   name: 'World Engine',
   description: 'Plaintext config-folder storage for World Engine.',
+  version: FALLBACK_VERSION,
 };
+
+function getPluginVersion() {
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    if (packageJson && packageJson.version) return String(packageJson.version);
+  } catch (error) {}
+  return FALLBACK_VERSION;
+}
 
 function toPosixPath(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -91,7 +102,12 @@ async function init(router) {
 
   router.get('/status', async (_req, res) => {
     await ensureConfigDir();
-    res.json({ ok: true, configDir: CONFIG_DIR });
+    res.json({
+      ok: true,
+      configDir: CONFIG_DIR,
+      pluginVersion: getPluginVersion(),
+      storageApiVersion: STORAGE_API_VERSION,
+    });
   });
 
   router.get('/list', async (_req, res) => {
@@ -147,7 +163,7 @@ async function init(router) {
     }
   });
 
-  console.log(`[World Engine] Server plugin loaded. Config dir: ${CONFIG_DIR}`);
+  console.log(`[World Engine] Server plugin loaded. Version: ${getPluginVersion()}. Config dir: ${CONFIG_DIR}`);
 }
 
 async function exit() {

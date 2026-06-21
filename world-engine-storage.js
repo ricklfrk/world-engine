@@ -10,6 +10,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
   var memoryStore = {};
   var configFolderAvailable = false;
   var hydratePromise = null;
+  var serverStatus = null;
 
   var APPLY_CONFIG_KEYS = {
     world_engine_settings: true,
@@ -212,7 +213,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async function() {
       try {
-        await pluginRequest('/status', { method: 'GET' });
+        serverStatus = await pluginRequest('/status', { method: 'GET' });
         configFolderAvailable = true;
         var listed = await pluginRequest('/list', { method: 'GET' });
         var files = Array.isArray(listed.files) ? listed.files : [];
@@ -230,6 +231,7 @@ window.WORLD_ENGINE_STORAGE = (function() {
         console.log('[World Engine] Config folder storage ready:', files.length, 'files');
         return true;
       } catch(e) {
+        serverStatus = null;
         configFolderAvailable = false;
         console.warn('[World Engine] Config folder server plugin unavailable; using fallback memory/settings store.', e.message || e);
         return false;
@@ -386,9 +388,20 @@ window.WORLD_ENGINE_STORAGE = (function() {
     return configFolderAvailable ? 'config-folder' : (getExtensionSettingsRoot() ? 'fallback-extension-settings' : 'fallback-memory');
   }
 
+  function getServerStatus() {
+    if (!serverStatus) return null;
+    return Object.assign({}, serverStatus);
+  }
+
+  function getServerVersion() {
+    return serverStatus && serverStatus.pluginVersion ? String(serverStatus.pluginVersion) : '';
+  }
+
   return {
     initConfigFolder: initConfigFolder,
     getBackendName: getBackendName,
+    getServerStatus: getServerStatus,
+    getServerVersion: getServerVersion,
     getItem: getItem,
     setItem: setItem,
     removeItem: removeItem,

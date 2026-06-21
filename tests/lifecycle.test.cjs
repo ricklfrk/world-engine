@@ -17,6 +17,12 @@ function createBrowserSandbox(options = {}) {
   const deletes = [];
   const requests = [];
   const reads = new Map(Object.entries(options.files || {}));
+  const pluginStatus = Object.assign({
+    ok: true,
+    configDir: '/plugins/world-engine/config',
+    pluginVersion: 'test-version',
+    storageApiVersion: 1
+  }, options.status || {});
   const context = Object.assign({
     chatId: 'chat A',
     characterId: 'char-1',
@@ -43,7 +49,7 @@ function createBrowserSandbox(options = {}) {
 
   async function fetch(url, fetchOptions = {}) {
     requests.push({ url, options: fetchOptions });
-    if (url.endsWith('/status')) return jsonResponse({ ok: true });
+    if (url.endsWith('/status')) return jsonResponse(pluginStatus);
     if (url.endsWith('/list')) {
       return jsonResponse({ files: Array.from(reads.keys()).map((filePath) => ({ path: filePath })) });
     }
@@ -180,6 +186,26 @@ test('storage sends SillyTavern request headers to plugin writes', async () => {
   assert.equal(writeRequest.options.headers['Content-Type'], 'application/json');
 });
 
+test('storage exposes server plugin status and version after hydration', async () => {
+  const env = createBrowserSandbox({
+    status: {
+      configDir: '/home/node/app/plugins/world-engine/config',
+      pluginVersion: '3.4.4',
+      storageApiVersion: 1
+    }
+  });
+  runScript(env.sandbox, 'world-engine-storage.js');
+
+  await env.window.WORLD_ENGINE_STORAGE.initConfigFolder();
+
+  const status = env.window.WORLD_ENGINE_STORAGE.getServerStatus();
+  assert.equal(env.window.WORLD_ENGINE_STORAGE.getServerVersion(), '3.4.4');
+  assert.equal(status.ok, true);
+  assert.equal(status.configDir, '/home/node/app/plugins/world-engine/config');
+  assert.equal(status.pluginVersion, '3.4.4');
+  assert.equal(status.storageApiVersion, 1);
+});
+
 test('core saveState produces lifecycle state.save and writes chat files', async () => {
   const env = createBrowserSandbox({ context: { chatId: 'state chat', chat: [{ mes: 'one' }, { mes: 'two' }] } });
   runScript(env.sandbox, 'world-engine-storage.js');
@@ -223,6 +249,8 @@ test('world-engine loader includes logger and covers major lifecycle event names
     'module.load.done',
     'storage.init.start',
     'storage.init.done',
+    'storage.version.missing',
+    'storage.version.mismatch',
     'css.reloaded',
     'ui.build.start',
     'ui.build.done',
